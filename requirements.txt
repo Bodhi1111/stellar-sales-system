@@ -9,3 +9,4 @@ PyYAML
 SQLAlchemy
 asyncpg
 pydantic-settings
+greenlet

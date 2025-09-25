@@ -30,19 +30,19 @@ class DatabaseManager:
             print("❌ Database connection pool closed.")
 
     @asynccontextmanager
-async def session_context(self):
-    """Provides a clean way to handle database sessions."""
-    if not self.session_maker:
-        await self.initialize()
-
-    session = self.session_maker()
-    try:
-        yield session
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
+    async def session_context(self):
+        """Provides a clean way to handle database sessions."""
+        if not self.session_maker:
+            await self.initialize()
+    
+        session = self.session_maker()
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
 # Create a single, global instance that the whole app can share
 db_manager = DatabaseManager()
