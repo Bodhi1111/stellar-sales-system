@@ -1,0 +1,5 @@
+setup.py
+stellar_sales_system.egg-info/PKG-INFO
+stellar_sales_system.egg-info/SOURCES.txt
+stellar_sales_system.egg-info/dependency_links.txt
+stellar_sales_system.egg-info/top_level.txt
