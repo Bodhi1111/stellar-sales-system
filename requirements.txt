@@ -10,3 +10,7 @@ SQLAlchemy
 asyncpg
 pydantic-settings
 greenlet
+watchdog
+langchain
+langgraph
+requests

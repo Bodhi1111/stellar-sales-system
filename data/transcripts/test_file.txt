@@ -1,0 +1,1 @@
+echo "Stellar Sales System is a project designed to analyze sales call transcripts. The system automatically chunks the text, extracts key information, and helps generate follow-up materials. This process involves multiple intelligent agents working in a coordinated pipeline." > data/transcripts/test_file.txt

@@ -9,8 +9,14 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 
+    # LLM Settings
+    OLLAMA_API_URL: str = "http://localhost:11434/api/generate"
+    LLM_MODEL_NAME: str = "mistral"
+
     # Project Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
+    # Agent-Specific Settings
+    WATCHER_DIRECTORY: Path = BASE_DIR / "data" / "transcripts"
 
     class Config:
         env_file = ".env"
