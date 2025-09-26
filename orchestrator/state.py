@@ -5,11 +5,13 @@ class AgentState(TypedDict):
     """
     This is the basket that carries our data through the graph.
     """
-    # The path to the file being processed
     file_path: Path
-
-    # A list to hold the text chunks after the chunker runs
     chunks: List[str]
-
-    # A dictionary to hold the data extracted by the LLM
     extracted_data: Dict[str, Any]
+    crm_data: Dict[str, Any]
+    email_draft: str
+    db_save_status: Dict[str, Any]
+    social_content: Dict[str, Any]
+
+    # A dictionary to hold the coaching feedback
+    coaching_feedback: Dict[str, Any]

@@ -14,3 +14,4 @@ watchdog
 langchain
 langgraph
 requests
+sentence-transformers

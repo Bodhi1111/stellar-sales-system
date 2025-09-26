@@ -17,7 +17,12 @@ class Settings(BaseSettings):
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
     # Agent-Specific Settings
     WATCHER_DIRECTORY: Path = BASE_DIR / "data" / "transcripts"
+    
+    # Vector DB Settings
+    QDRANT_URL: str = "http://localhost:6333"
 
+    # Embedding Model Settings
+    EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
     class Config:
         env_file = ".env"
         case_sensitive = False
