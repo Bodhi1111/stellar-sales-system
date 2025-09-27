@@ -1,61 +1,65 @@
 import json
 import requests
 from typing import List, Dict, Any
+from sentence_transformers import SentenceTransformer
+from sentence_transformers.util import semantic_search
+
 from agents.base_agent import BaseAgent
-from config.settings import settings
+from config.settings import Settings, settings
 
 class ExtractorAgent(BaseAgent):
     """
-    This agent takes text chunks and uses an LLM to extract information.
+    This agent uses a two-step "Local RAG" process to extract information.
     """
-    def __init__(self, settings):
+    def __init__(self, settings: Settings):
         super().__init__(settings)
         self.api_url = settings.OLLAMA_API_URL
         self.model_name = settings.LLM_MODEL_NAME
+        # This agent now needs its own embedding model for in-memory search
+        self.embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
 
-    def _construct_prompt(self, chunks: List[str]) -> str:
-        """Constructs a prompt for the LLM from the text chunks."""
-        full_text = "\\n---\\n".join(chunks)
-        prompt = f"""
-        You are an expert sales analyst. Read the following sales call transcript and extract the specified information.
-        Provide your answer ONLY in JSON format with the following keys: "customer_name", "main_objection", "action_items".
+    def _get_relevant_context(self, query: str, chunks: List[str], top_k: int = 2) -> str:
+        """Performs in-memory semantic search to find the most relevant chunks."""
+        query_embedding = self.embedding_model.encode(query)
+        chunk_embeddings = self.embedding_model.encode(chunks)
 
-        Transcript:
-        ---
-        {full_text}
-        ---
-
-        JSON Output:
-        """
-        return prompt
+        hits = semantic_search(query_embedding, chunk_embeddings, top_k=top_k)
+        # We take the first list of hits for our single query
+        context_chunks = [chunks[hit['corpus_id']] for hit in hits[0]]
+        return "\\n---\\n".join(context_chunks)
 
     async def run(self, chunks: List[str]) -> Dict[str, Any]:
-        print(f"🕵️ ExtractorAgent received {len(chunks)} chunks. Contacting LLM...")
+        print(f"🕵️ ExtractorAgent starting enriched extraction on {len(chunks)} chunks...")
 
-        prompt = self._construct_prompt(chunks)
-
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "format": "json", # Ask Ollama to guarantee JSON output
-            "stream": False
+        questions = {
+            "customer_name": "What is the customer's full name?",
+            "main_objection": "What is the customer's main objection or primary concern?",
+            "action_items": "What are the specific next steps or action items discussed?"
         }
 
-        try:
-            # Send the prompt to the Ollama API
-            response = requests.post(self.api_url, json=payload)
-            response.raise_for_status() # Raise an exception for bad status codes
+        extracted_data = {}
 
-            # The response from Ollama is a JSON string, so we parse it twice
-            response_data = response.json()
-            extracted_data = json.loads(response_data.get("response", "{}"))
+        for key, question in questions.items():
+            print(f"   -> Finding context for: '{key}'")
+            context = self._get_relevant_context(question, chunks)
 
-            print(f"   LLM successfully extracted data: {extracted_data}")
-            return extracted_data
+            prompt = f"""Based ONLY on the following Context, answer the Question. If the context does not contain the answer, say 'Not found in context'.
+            Context:
+            ---
+            {context}
+            ---
+            Question: {question}
+            Answer:"""
 
-        except requests.exceptions.RequestException as e:
-            print(f"   ❌ ERROR: Could not connect to Ollama API: {e}")
-            return {"error": str(e)}
-        except json.JSONDecodeError:
-            print(f"   ❌ ERROR: Failed to parse JSON response from LLM.")
-            return {"error": "Invalid JSON response"}
+            payload = {"model": self.model_name, "prompt": prompt, "stream": False}
+
+            try:
+                response = requests.post(self.api_url, json=payload)
+                response.raise_for_status()
+                answer = response.json().get("response", "").strip()
+                extracted_data[key] = answer
+            except Exception:
+                extracted_data[key] = "Error during extraction."
+
+        print(f"   Enriched extraction complete: {extracted_data}")
+        return extracted_data

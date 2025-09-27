@@ -1,31 +1,32 @@
 import asyncio
 from pathlib import Path
-from orchestrator.graph import app # Import our compiled graph
+from orchestrator.graph import app
 
 async def run_pipeline(file_path: Path):
     """
-    Runs the LangGraph pipeline with a given file path.
+    Reads a file and runs the full, advanced LangGraph pipeline.
     """
-    print(f"--- Starting Pipeline for {file_path.name} ---")
+    print(f"--- Starting Advanced Pipeline for {file_path.name} ---")
+    try:
+        # Read the raw text from the file first
+        raw_text = file_path.read_text(encoding='utf-8')
 
-    # This is the initial "data basket" we give to the graph
-    initial_state = {"file_path": file_path}
+        # Provide the initial state for our new graph
+        initial_state = { "file_path": file_path, "raw_text": raw_text }
 
-    # astream() runs the graph from the entry point to the end
-    async for event in app.astream(initial_state):
-        # This will print the output from each node as it runs
-        for key, value in event.items():
-            print(f"Node '{key}' finished. Final state:")
-            print(value)
+        # Run the graph
+        async for event in app.astream(initial_state):
+            for key, value in event.items():
+                print(f"--- Node '{key}' Finished ---")
 
-    print("--- Pipeline Finished ---")
-
+        print("--- Advanced Pipeline Finished ---")
+    except Exception as e:
+        print(f"❌ ERROR: An unexpected error occurred in the pipeline: {e}")
 
 if __name__ == "__main__":
-    # The test file we created earlier
     test_file = Path("data/transcripts/test_file.txt")
-
     if test_file.exists():
         asyncio.run(run_pipeline(file_path=test_file))
     else:
-        print(f"Error: Test file not found at {test_file}")
+        print(f"❌ ERROR: Test file not found at {test_file}")
+        print("Please create a test file with the [timestamp] Speaker: text format.")

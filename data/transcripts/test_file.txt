@@ -1,1 +1,6 @@
-echo "Stellar Sales System is a project designed to analyze sales call transcripts. The system automatically chunks the text, extracts key information, and helps generate follow-up materials. This process involves multiple intelligent agents working in a coordinated pipeline." > data/transcripts/test_file.txt
+[00:00:05] Sales Pro: Hello, thanks for joining the call today.
+[00:00:10] Client: Hi, thanks for having me. I'm interested in learning about trusts.
+[00:00:15] Sales Pro: Great. We'll cover that. The main goal is to discuss your estate and see if a trust is a good fit.
+[00:25:10] Client: This all sounds good, but the price seems a bit high.
+[00:25:20] Sales Pro: I understand. Let's talk about the value and what's included.
+[00:28:45] Client: Okay, let's schedule a follow-up meeting for next week.

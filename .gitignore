@@ -12,3 +12,4 @@ data/exports/
 # IDE files
 .vscode/
 .idea/
+data/transcripts/

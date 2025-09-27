@@ -8,3 +8,6 @@ docker-down:
 	docker-compose down
 
 .PHONY: install docker-up docker-down
+
+run-api:
+	./venv/bin/uvicorn api.app:app --reload
