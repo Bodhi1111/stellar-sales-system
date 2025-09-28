@@ -21,3 +21,4 @@ class AgentState(TypedDict):
 
     # --- Persistence Agent Outputs ---
     db_save_status: Dict[str, Any]
+    historian_status: Dict[str, Any] # New field

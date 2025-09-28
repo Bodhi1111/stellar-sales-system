@@ -11,6 +11,7 @@ from agents.crm.crm_agent import CRMAgent
 from agents.email.email_agent import EmailAgent
 from agents.social.social_agent import SocialAgent
 from agents.sales_coach.sales_coach_agent import SalesCoachAgent
+from agents.historian.historian_agent import HistorianAgent
 from agents.persistence.persistence_agent import PersistenceAgent
 
 # Initialize all our agents
@@ -22,6 +23,7 @@ crm_agent = CRMAgent(settings)
 email_agent = EmailAgent(settings)
 social_agent = SocialAgent(settings)
 sales_coach_agent = SalesCoachAgent(settings)
+historian_agent = HistorianAgent(settings)
 persistence_agent = PersistenceAgent(settings)
 
 # --- Define Agent Nodes ---
@@ -64,6 +66,10 @@ async def sales_coach_node(state: AgentState):
     coaching_feedback = await sales_coach_agent.run(chunks=chunks)
     return {"coaching_feedback": coaching_feedback}
 
+async def historian_node(state: AgentState):
+    historian_status = await historian_agent.run(state=state)
+    return {"historian_status": historian_status}
+
 async def persistence_node(state: AgentState):
     db_status = await persistence_agent.run(
         file_path=state.get("file_path"), chunks=state.get("chunks"),
@@ -82,27 +88,29 @@ workflow.add_node("crm", crm_node)
 workflow.add_node("email", email_node)
 workflow.add_node("social", social_node)
 workflow.add_node("sales_coach", sales_coach_node)
+workflow.add_node("historian", historian_node)
 workflow.add_node("persistence", persistence_node)
 
-# Define the CORRECT flow
+# Define the flow
 workflow.set_entry_point("parser")
 workflow.add_edge("parser", "structuring")
 workflow.add_edge("structuring", "chunker")
 workflow.add_edge("chunker", "extractor")
 
-# After extractor, FAN OUT to all analysis & persistence agents
+# After extractor, FAN OUT to all final agents (except persistence)
 workflow.add_edge("extractor", "crm")
 workflow.add_edge("extractor", "email")
 workflow.add_edge("extractor", "social")
 workflow.add_edge("extractor", "sales_coach")
-workflow.add_edge("extractor", "persistence") # Postgres/Qdrant runs in parallel here
+workflow.add_edge("extractor", "historian")
 
-# This is a 'fan-in'. We need a final node to wait for all parallel tasks to finish.
-# We will make persistence the final join point.
+# FAN IN to the final persistence node
 workflow.add_edge("crm", "persistence")
 workflow.add_edge("email", "persistence")
 workflow.add_edge("social", "persistence")
 workflow.add_edge("sales_coach", "persistence")
+workflow.add_edge("historian", "persistence")
 
 workflow.set_finish_point("persistence")
+
 app = workflow.compile()

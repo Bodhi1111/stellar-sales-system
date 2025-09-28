@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
 
     # Neo4j Settings
-    NEO4J_URL: str = "bolt://0.0.0.0:7687"
+    NEO4J_URL: str = "bolt://127.0.0.1:7687"  # Force IPv4 to avoid IPv6 issues
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "password"
     class Config:

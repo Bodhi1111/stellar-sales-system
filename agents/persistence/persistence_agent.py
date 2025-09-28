@@ -47,6 +47,8 @@ class PersistenceAgent(BaseAgent):
 
         # --- Save to PostgreSQL ---
         try:
+            # Ensure database is initialized
+            await db_manager.initialize()
             async with db_manager.session_context() as session:
                 new_transcript = Transcript(
                     filename=file_path.name, full_text=full_text,
@@ -58,7 +60,9 @@ class PersistenceAgent(BaseAgent):
                 transcript_id = new_transcript.id
             print(f"   ✅ Successfully saved transcript metadata to PostgreSQL (ID: {transcript_id}).")
         except Exception as e:
-            print(f"   ❌ ERROR: Failed to save to PostgreSQL: {e}")
+            import traceback
+            print(f"   ❌ ERROR: Failed to save to PostgreSQL: {str(e)}")
+            print(f"   Traceback: {traceback.format_exc()}")
             return {"db_save_status": "postgres_error"}
 
         # --- Create and Save Embeddings to Qdrant ---
