@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from agents.base_agent import BaseAgent
 from config.settings import Settings
 
