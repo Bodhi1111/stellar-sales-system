@@ -39,7 +39,8 @@ class PersistenceAgent(BaseAgent):
 
     async def run(
         self, file_path: Path, chunks: List[str], crm_data: Dict[str, Any],
-        social_content: Dict[str, Any], email_draft: str
+        social_content: Dict[str, Any], email_draft: str,
+        coaching_feedback: Dict[str, Any] | None = None
     ):
         print(f"💾 PersistenceAgent saving data for: {file_path.name}")
         full_text = "\\n".join(chunks)
