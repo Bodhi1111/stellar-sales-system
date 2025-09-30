@@ -92,12 +92,14 @@ async def crm_node(state: AgentState):
     email_draft = state.get("email_draft", {})
     social_content = state.get("social_content", {})
     coaching_feedback = state.get("coaching_feedback", {})
-    
+    chunks = state.get("chunks", [])  # Get the actual transcript chunks
+
     # Enhanced CRM processing with complete context
     crm_data = await crm_agent.run(
         extracted_data=extracted_data,
+        chunks=chunks,                      # NEW: Pass actual transcript chunks
         email_draft=email_draft,           # NEW: Email follow-up context
-        social_opportunities=social_content,   # NEW: Marketing opportunities  
+        social_opportunities=social_content,   # NEW: Marketing opportunities
         coaching_insights=coaching_feedback    # NEW: Performance context
     )
     
