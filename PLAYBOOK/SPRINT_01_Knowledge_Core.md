@@ -22,76 +22,86 @@ To lay the foundational "brain" of the Stellar system. By the end of this sprint
     * The following complete code should be placed in `agents/embedder/embedder_agent.py`.
 
     ```python
-    import uuid
-    from typing import List, Dict, Any
-    from qdrant_client import QdrantClient, models
-    from sentence_transformers import SentenceTransformer
+# This is the new, enhanced code for agents/embedder/embedder_agent.py
 
-    from agents.base_agent import BaseAgent
-    from config.settings import Settings
+import uuid
+from typing import List, Dict, Any
+from datetime import datetime # NEW IMPORT
+from qdrant_client import QdrantClient, models
+from sentence_transformers import SentenceTransformer
 
-    class EmbedderAgent(BaseAgent):
-        """
-        This agent's sole responsibility is to take raw text chunks, generate
-        vector embeddings, and store them in the Qdrant vector database.
-        It forms the core of the system's semantic memory.
-        """
-        def __init__(self, settings: Settings):
-            super().__init__(settings)
-            self.embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
-            self.qdrant_client = QdrantClient(url=settings.QDRANT_URL)
-            self.collection_name = "transcripts"
-            self._ensure_qdrant_collection_exists()
+from agents.base_agent import BaseAgent
+from config.settings import Settings
 
-        def _ensure_qdrant_collection_exists(self):
-            """Creates the Qdrant collection if it doesn't already exist."""
-            try:
-                self.qdrant_client.get_collection(collection_name=self.collection_name)
-            except Exception:
-                self.qdrant_client.recreate_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=models.VectorParams(
-                        size=self.embedding_model.get_sentence_embedding_dimension(),
-                        distance=models.Distance.COSINE
-                    )
+class EmbedderAgent(BaseAgent):
+    """
+    This agent's sole responsibility is to take raw text chunks, generate
+    vector embeddings, and store them in the Qdrant vector database.
+    It forms the core of the system's semantic memory.
+    """
+    def __init__(self, settings: Settings):
+        super().__init__(settings)
+        self.embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+        self.qdrant_client = QdrantClient(url=settings.QDRANT_URL)
+        self.collection_name = "transcripts"
+        self._ensure_qdrant_collection_exists()
+
+    def _ensure_qdrant_collection_exists(self):
+        """Creates the Qdrant collection if it doesn't already exist."""
+        try:
+            self.qdrant_client.get_collection(collection_name=self.collection_name)
+        except Exception:
+            self.qdrant_client.recreate_collection(
+                collection_name=self.collection_name,
+                vectors_config=models.VectorParams(
+                    size=self.embedding_model.get_sentence_embedding_dimension(),
+                    distance=models.Distance.COSINE
                 )
+            )
 
-        async def run(self, chunks: List[str], transcript_id: int) -> Dict[str, Any]:
-            """
-            Generates embeddings for a list of text chunks and upserts them into Qdrant.
-            """
-            print(f"🧠 EmbedderAgent: Generating {len(chunks)} embeddings for transcript ID {transcript_id}...")
+    async def run(self, chunks: List[str], transcript_id: int) -> Dict[str, Any]:
+        """
+        Generates embeddings for a list of text chunks and upserts them into Qdrant.
+        """
+        print(f"🧠 EmbedderAgent: Generating {len(chunks)} embeddings for transcript ID {transcript_id}...")
 
-            try:
-                embeddings = self.embedding_model.encode(
-                    chunks, convert_to_tensor=False, show_progress_bar=False
-                ).tolist()
+        try:
+            embeddings = self.embedding_model.encode(
+                chunks, convert_to_tensor=False, show_progress_bar=False
+            ).tolist()
 
-                payloads = [
-                    {
-                        "transcript_id": transcript_id,
-                        "text": chunk,
-                        "doc_type": "transcript_chunk"
-                    } for chunk in chunks
-                ]
+            # --- ENHANCEMENT: Add richer metadata to each payload ---
+            payloads = [
+                {
+                    "transcript_id": transcript_id,
+                    "chunk_index": i, # NEW
+                    "text": chunk,
+                    "doc_type": "transcript_chunk",
+                    "word_count": len(chunk.split()), # NEW
+                    "created_at": datetime.now().isoformat() # NEW
+                } for i, chunk in enumerate(chunks)
+            ]
 
-                self.qdrant_client.upsert(
-                    collection_name=self.collection_name,
-                    points=models.Batch(
-                        ids=[str(uuid.uuid4()) for _ in chunks],
-                        vectors=embeddings,
-                        payloads=payloads
-                    ),
-                    wait=True
-                )
+            # --- ENHANCEMENT: Use deterministic IDs for idempotency ---
+            deterministic_ids = [f"transcript_{transcript_id}_chunk_{i}" for i, _ in enumerate(chunks)]
 
-                print(f"   ✅ Successfully saved {len(chunks)} embeddings to Qdrant.")
-                return {"embedding_status": "success", "vector_count": len(chunks)}
+            self.qdrant_client.upsert(
+                collection_name=self.collection_name,
+                points=models.Batch(
+                    ids=deterministic_ids, # UPDATED
+                    vectors=embeddings,
+                    payloads=payloads
+                ),
+                wait=True
+            )
 
-            except Exception as e:
-                print(f"   ❌ ERROR in EmbedderAgent: {e}")
-                return {"embedding_status": "error", "error_message": str(e)}
-    ```
+            print(f"   ✅ Successfully saved {len(chunks)} embeddings to Qdrant.")
+            return {"embedding_status": "success", "vector_count": len(chunks)}
+
+        except Exception as e:
+            # --- ENHANCEMENT: More specific error logging ---
+            print(f"   ❌ ERROR in EmbedderAgent: {type(e).__name__}: {e}")
+            return {"embedding_status": "error", "error_message": str(e)}
 
 ---
 
@@ -111,114 +121,208 @@ To lay the foundational "brain" of the Stellar system. By the end of this sprint
     * The following complete code should be placed in `agents/knowledge_analyst/knowledge_analyst_agent.py`.
 
     ```python
-    import json
-    import requests
-    from typing import List, Dict, Any
-    from pathlib import Path
+# This is the new, enhanced code for agents/knowledge_analyst/knowledge_analyst_agent.py
 
-    from agents.base_agent import BaseAgent
-    from config.settings import Settings
-    from core.database.neo4j import neo4j_manager
+  import json
+  import requests
+  from typing import List, Dict, Any
+  from pathlib import Path
 
-    class KnowledgeAnalystAgent(BaseAgent):
-        """
-        Analyzes the transcript to extract key entities (Client, Objections,
-        Products, etc.) and their relationships, then populates the Neo4j
-        knowledge graph. Forms the relational memory of the system.
-        """
-        def __init__(self, settings: Settings):
-            super().__init__(settings)
-            self.api_url = settings.OLLAMA_API_URL
-            self.model_name = settings.LLM_MODEL_NAME
+  from agents.base_agent import BaseAgent
+  from config.settings import Settings
+  from core.database.neo4j import neo4j_manager
 
-        def _construct_prompt(self, full_transcript: str) -> str:
-            """Constructs the prompt for the LLM to extract structured entities."""
-            prompt = f"""
-            You are an expert financial analyst specializing in estate planning.
-            Your task is to read the following sales meeting transcript and extract
-            key entities and relationships.
+  class KnowledgeAnalystAgent(BaseAgent):
+      """
+      Analyzes transcript chunks using a Map-Reduce strategy to extract
+      a comprehensive set of entities for the Neo4j knowledge graph,
+      ensuring no data is lost from long transcripts.
+      """
+      def __init__(self, settings: Settings):
+          super().__init__(settings)
+          self.api_url = settings.OLLAMA_API_URL
+          self.model_name = settings.LLM_MODEL_NAME
 
-            Transcript:
-            ---
-            {full_transcript}
-            ---
+      def _get_required_fields_prompt(self) -> str:
+          """
+          Returns a formatted string of the required fields for the LLM prompt.
+          This uses the highly specific list you provided.
+          """
+          return """
+          - "transcript_id": a unique identifier for the meeting
+          - "meeting_date": when the meeting occurred
+          - "client_name": the customer's full name
+          - "spouse_name": the customer's spouse's name, if mentioned
+          - "client_email": the customer's email address
+          - "client_phone_number": the customer's phone number, if mentioned
+          - "client_state": the customer's state of residence
+          - "marital_status": "Single", "Married", "Divorced", "Widowed", or "Separated"
+          - "children_count": the number of children
+          - "estate_value": the total estimated estate worth in dollars
+          - "real_estate_count": the number of properties owned
+          - "real_estate_locations": states of properties owned, if mentioned
+          - "llc_interest": any business interests or LLCs mentioned
+          - "deal": the total service cost
+          - "deposit": the deposit amount paid
+          - "product_discussed": a list of products like "Estate Planning" or "Life Insurance"
+          - "objections_raised": a list of client concerns and objections
+          - "meeting_outcome": "Won", "Lost", "Pending", or "Follow-up Scheduled"
+          - "next_steps": a list of action items
+          """
 
-            Based ONLY on the transcript, extract the following information.
-            If a piece of information is not present, use "Not found".
-            - client_name: The full name of the primary client.
-            - main_objection: The single biggest concern or objection raised by the client.
-            - products_discussed: A list of specific products or services mentioned (e.g., "Revocable Living Trust", "Will Preparation").
-            - action_items: A list of concrete next steps or tasks to be completed.
+      async def _map_chunks_to_facts(self, chunks: List[str]) -> str:
+          """MAP STEP: Analyzes each chunk individually to extract raw facts."""
+          all_facts = []
+          failed_chunks = []
+          for i, chunk in enumerate(chunks):
+              print(f"   -> Mapping chunk {i+1}/{len(chunks)} to facts...")
+              prompt = f"""
+              You are a fact-extraction specialist. Read the following excerpt 
+  from a sales transcript and extract any and all potential facts related to the
+   following fields. Do not infer or summarize, just extract raw data points.
 
-            Respond ONLY with a valid JSON object. Example:
-            {{
-              "client_name": "Jane Doe",
-              "main_objection": "The cost of setting up the trust seems high.",
-              "products_discussed": ["Revocable Living Trust", "Power of Attorney"],
-              "action_items": ["Schedule follow-up meeting for next week", "Send client the information packet."]
-            }}
-            """
-            return prompt
+              Required Fields of Interest:
+              {self._get_required_fields_prompt()}
 
-        async def run(self, chunks: List[str], file_path: Path) -> Dict[str, Any]:
-            """
-            Analyzes transcript chunks, extracts entities via an LLM, and saves
-            them to the Neo4j knowledge graph.
-            """
-            print(f"📈 KnowledgeAnalystAgent: Analyzing transcript for {file_path.name}...")
-            full_transcript = "\\n".join(chunks)
-            prompt = self._construct_prompt(full_transcript)
-            payload = {
-                "model": self.model_name,
-                "prompt": prompt,
-                "format": "json",
-                "stream": False
-            }
+              Transcript Excerpt:
+              ---
+              {chunk}
+              ---
 
-            try:
-                # 1. Extract Entities using LLM
-                response = requests.post(self.api_url, json=payload)
-                response.raise_for_status()
-                extracted_entities = json.loads(response.json().get("response", "{}"))
-                print(f"   -> LLM extracted entities: {extracted_entities}")
+              Extracted Facts (use bullet points):
+              """
+              payload = {"model": self.model_name, "prompt": prompt, "stream": 
+  False}
+              try:
+                  response = requests.post(self.api_url, 
+  json=payload).json().get("response", "")
+                  if response:
+                      all_facts.append(response)
+              except Exception as e:
+                  failed_chunks.append(i+1)
+                  print(f"      - Warning: Could not process chunk {i+1}: {e}")
+          
+          if failed_chunks:
+              print(f"   ⚠️ Failed to process chunks: {failed_chunks}")
+          return "\n".join(all_facts)
 
-                client_name = extracted_entities.get("client_name", "Unknown Client")
-                main_objection = extracted_entities.get("main_objection")
+      async def _reduce_facts_to_json(self, all_facts: str) -> Dict[str, Any]:
+          """REDUCE STEP: Synthesizes aggregated facts into a single JSON 
+  object."""
+          print("   -> Reducing all extracted facts into a final JSON 
+  object...")
+          prompt = f"""
+          You are a data synthesis expert. You will be given a list of raw, 
+  unordered facts extracted from a sales transcript. Your job is to analyze all 
+  these facts and consolidate them into a single, structured JSON object.
 
-                # 2. Populate Knowledge Graph
-                # MERGE the Meeting and Client nodes
-                await neo4j_manager.execute_query(
-                    \"\"\"
-                    MERGE (m:Meeting {{filename: $filename}})
-                    MERGE (c:Client {{name: $client_name}})
-                    MERGE (c)-[:PARTICIPATED_IN]->(m)
-                    \"\"\",
-                    {"filename": file_path.name, "client_name": client_name}
-                )
+          Use the following fields. If a fact is not present, use a null value, 
+  an empty list, or 0 for numeric fields.
+          {self._get_required_fields_prompt()}
 
-                # If an objection was found, MERGE it and connect it
-                if main_objection and "not found" not in main_objection.lower():
-                    await neo4j_manager.execute_query(
-                        \"\"\"
-                        MATCH (m:Meeting {{filename: $filename}})
-                        MERGE (o:Objection {{text: $objection_text}})
-                        MERGE (m)-[:CONTAINED]->(o)
-                        \"\"\",
-                        {"filename": file_path.name, "objection_text": main_objection}
-                    )
+          List of Raw Facts:
+          ---
+          {all_facts}
+          ---
 
-                print(f"   ✅ Successfully updated knowledge graph for {file_path.name}.")
-                # Pass on the extracted entities for use by other agents
-                return {
-                    "knowledge_graph_status": "success",
-                    "extracted_entities": extracted_entities
-                }
+          Respond ONLY with the final, consolidated JSON object.
+          """
+          payload = {"model": self.model_name, "prompt": prompt, "format": 
+  "json", "stream": False}
+          try:
+              response_json_str = requests.post(self.api_url, 
+  json=payload).json().get("response", "{}")
+              return json.loads(response_json_str)
+          except Exception as e:
+              print(f"      - Error: Could not reduce facts to JSON: {e}")
+              return {}
 
-            except Exception as e:
-                print(f"   ❌ ERROR in KnowledgeAnalystAgent: {e}")
-                return {"knowledge_graph_status": "error", "error_message": str(e)}
+      async def run(self, chunks: List[str], file_path: Path) -> Dict[str, Any]:
+          """Analyzes transcript, extracts entities, and saves them to Neo4j."""
+          print(f"📊 KnowledgeAnalystAgent: Analyzing transcript for 
+  {file_path.name}...")
 
-    ```
+          extracted_facts = await self._map_chunks_to_facts(chunks)
+          if not extracted_facts:
+               print("   - No facts extracted, skipping analysis.")
+               return {"knowledge_graph_status": "skipped", 
+  "extracted_entities": {}}
+          
+          extracted_entities = await self._reduce_facts_to_json(extracted_facts)
+          print(f"   -> Final extracted entities: 
+  {json.dumps(extracted_entities, indent=2)}")
+
+          try:
+              client_name = extracted_entities.get("client_name")
+              if not client_name or "unknown" in client_name.lower():
+                  print("   - Skipping Neo4j update: Client name not found.")
+                  return {"knowledge_graph_status": "skipped", 
+  "extracted_entities": extracted_entities}
+
+              # --- ENHANCEMENT: Enrich the Client node with more properties ---
+              await neo4j_manager.execute_query(
+                  """
+                  MERGE (c:Client {name: $client_name})
+                  SET c.email = $email,
+                      c.marital_status = $marital_status,
+                      c.children_count = $children_count
+                  """,
+                  {
+                      "client_name": client_name,
+                      "email": extracted_entities.get("client_email"),
+                      "marital_status": 
+  extracted_entities.get("marital_status"),
+                      "children_count": extracted_entities.get("children_count",
+   0),
+                  }
+              )
+
+              # --- ENHANCEMENT: Add outcome property to the Meeting node ---
+              await neo4j_manager.execute_query(
+                  """
+                  MERGE (m:Meeting {filename: $filename})
+                  SET m.outcome = $outcome
+                  WITH m
+                  MATCH (c:Client {name: $client_name})
+                  MERGE (c)-[:PARTICIPATED_IN]->(m)
+                  """,
+                  {
+                      "filename": file_path.name,
+                      "outcome": extracted_entities.get("meeting_outcome"),
+                      "client_name": client_name
+                  }
+              )
+
+              # --- ENHANCEMENT: Add Objection nodes ---
+              for objection in extracted_entities.get("objections_raised", []):
+                  await neo4j_manager.execute_query(
+                      """
+                      MATCH (m:Meeting {filename: $filename})
+                      MERGE (o:Objection {text: $objection_text})
+                      MERGE (m)-[:CONTAINED]->(o)
+                      """,
+                      {"filename": file_path.name, "objection_text": objection}
+                  )
+
+              for product in extracted_entities.get("products_discussed", []):
+                  await neo4j_manager.execute_query(
+                      """
+                      MATCH (m:Meeting {filename: $filename})
+                      MERGE (p:Product {name: $product_name})
+                      MERGE (m)-[:DISCUSSED]->(p)
+                      """,
+                      {"filename": file_path.name, "product_name": product}
+                  )
+
+              print(f"   ✅ Successfully updated knowledge graph for 
+  {file_path.name}.")
+              return {
+                  "knowledge_graph_status": "success",
+                  "extracted_entities": extracted_entities
+              }
+          except Exception as e:
+              print(f"   ❌ ERROR during Neo4j update: {type(e).__name__}: {e}")
+              return {"knowledge_graph_status": "error", "error_message": str(e)}"
 
 ---
 
@@ -234,78 +338,88 @@ To lay the foundational "brain" of the Stellar system. By the end of this sprint
     * The following complete code should replace the existing content of `orchestrator/state.py`.
 
     ```python
-    from typing import TypedDict, List, Dict, Any
-    from pathlib import Path
+from typing import TypedDict, List, Dict, Any, Optional
+from pathlib import Path
 
-    class AgentState(TypedDict):
-        """
-        This is the basket that carries our data through the graph.
-        It is being updated to support the new "Intelligence First" architecture.
-        """
-        # --- Initial Input & Preprocessing ---
-        file_path: Path
-        raw_text: str
-        structured_dialogue: List[Dict[str, Any]]
-        conversation_phases: List[Dict[str, Any]]
-        chunks: List[str] # Now a simple list of strings
+class AgentState(TypedDict):
+    """
+    This is the basket that carries our data through the graph.
+    It is updated to support the new "Intelligence First" architecture
+    while maintaining backward compatibility for existing agents.
+    """
+    # --- Initial Input ---
+    file_path: Path
+    
+    # --- Preprocessing Outputs ---
+    raw_text: str
+    structured_dialogue: List[Dict[str, Any]]
+    conversation_phases: List[Dict[str, Any]]
+    chunks: List[str] # Now a simple list of strings
 
-        # --- Intelligence Core Outputs ---
-        transcript_id: int # NEW: PostgreSQL ID for linking data
-        extracted_entities: Dict[str, Any] # NEW: From KnowledgeAnalystAgent
+    # --- Intelligence Core Outputs ---
+    transcript_id: Optional[int] # PostgreSQL ID for linking all data
+    extracted_entities: Dict[str, Any] # NEW: From KnowledgeAnalystAgent
 
-        # --- Parallel Agent Outputs ---
-        crm_data: Dict[str, Any]
-        email_draft: str
-        social_content: Dict[str, Any]
-        coaching_feedback: Dict[str, Any]
+    # --- Backward Compatibility & Legacy Fields ---
+    extracted_data: Dict[str, Any] # PRESERVED: For backward compatibility with existing agents like CRMAgent.
+    crm_data: Dict[str, Any]
+    email_draft: str
+    social_content: Dict[str, Any]
+    coaching_feedback: Dict[str, Any]
 
-        # --- Persistence Agent Outputs ---
-        db_save_status: Dict[str, Any]
-        historian_status: Dict[str, Any]
-    ```
+    # --- Persistence Agent Outputs ---
+    db_save_status: Dict[str, Any]
+    historian_status: Dict[str, Any] # FIX: Corrected syntax, removed extra bracket
 
 #### **Task 1.3.2: Re-Architect the Orchestrator Graph**
 
-* **Rationale:** This is the most critical step of Sprint 1. We are fundamentally changing the data flow from a simple linear process to a parallel "Intelligence First" workflow. After the initial parsing, we will immediately create our semantic (Qdrant) and relational (Neo4j) knowledge in parallel. This ensures all downstream agents have access to this rich, multi-modal context.
+* **Rationale:** This is the culmination of Sprint 1. We are replacing the old, linear graph with our new "Intelligence First" architecture. This new graph correctly incorporates the `StructuringAgent`, solves the `transcript_id` dependency by using an initial persistence step, and efficiently creates the semantic and relational knowledge in parallel. It also maintains backward compatibility for the legacy downstream agents by populating the `extracted_data` field they expect.
 * **File to Modify:** `orchestrator/graph.py`
 * **Step 1: Add the Code**
-    * The following complete code should replace the existing content of `orchestrator/graph.py`. This is a significant refactor.
+    * The following complete code should replace the existing content of `orchestrator/graph.py`.
 
     ```python
-    from config.settings import settings
-    from orchestrator.state import AgentState
     from langgraph.graph import StateGraph, END
     from typing import Dict, Any
 
-    # --- Import ALL agents, including our new ones ---
+    from orchestrator.state import AgentState
+    from config.settings import settings
+
+    # --- Import ALL agents for the new ingestion workflow ---
+    # Foundational Agents
     from agents.parser.parser_agent import ParserAgent
     from agents.structuring.structuring_agent import StructuringAgent
     from agents.chunker.chunker import ChunkerAgent
-    from agents.embedder.embedder_agent import EmbedderAgent # NEW
-    from agents.knowledge_analyst.knowledge_analyst_agent import KnowledgeAnalystAgent # NEW
+
+    # Intelligence Core Agents
+    from agents.persistence.initial_persistence_agent import InitialPersistenceAgent
+    from agents.embedder.embedder_agent import EmbedderAgent
+    from agents.knowledge_analyst.knowledge_analyst_agent import KnowledgeAnalystAgent
+
+    # Legacy Downstream Agents (for compatibility)
     from agents.email.email_agent import EmailAgent
     from agents.social.social_agent import SocialAgent
     from agents.sales_coach.sales_coach_agent import SalesCoachAgent
     from agents.crm.crm_agent import CRMAgent
-    from agents.persistence.persistence_agent import PersistenceAgent # Will be modified later
-    from agents.historian.historian_agent import HistorianAgent
+
+    # Final Persistence Agent
+    from agents.persistence.final_persistence_agent import FinalPersistenceAgent
 
     # --- Initialize ALL agents ---
     parser_agent = ParserAgent(settings)
     structuring_agent = StructuringAgent(settings)
+    initial_persistence_agent = InitialPersistenceAgent(settings)
     chunker_agent = ChunkerAgent(settings)
-    embedder_agent = EmbedderAgent(settings) # NEW
-    knowledge_analyst_agent = KnowledgeAnalystAgent(settings) # NEW
+    embedder_agent = EmbedderAgent(settings)
+    knowledge_analyst_agent = KnowledgeAnalystAgent(settings)
     email_agent = EmailAgent(settings)
     social_agent = SocialAgent(settings)
     sales_coach_agent = SalesCoachAgent(settings)
     crm_agent = CRMAgent(settings)
-    persistence_agent = PersistenceAgent(settings) # Will be modified in a later sprint
-    historian_agent = HistorianAgent(settings)
+    final_persistence_agent = FinalPersistenceAgent(settings)
 
-    # --- Define Agent Nodes ---
+    # --- Define Agent Nodes for the Ingestion Workflow ---
 
-    # --- Phase 1: Sequential Preprocessing ---
     async def parser_node(state: AgentState) -> Dict[str, Any]:
         structured_dialogue = await parser_agent.run(file_path=state["file_path"])
         return {"structured_dialogue": structured_dialogue}
@@ -314,64 +428,101 @@ To lay the foundational "brain" of the Stellar system. By the end of this sprint
         conversation_phases = await structuring_agent.run(structured_dialogue=state["structured_dialogue"])
         return {"conversation_phases": conversation_phases}
 
+    async def initial_persistence_node(state: AgentState) -> Dict[str, Any]:
+        result = await initial_persistence_agent.run(file_path=state["file_path"])
+        return {"transcript_id": result["transcript_id"]}
+
     async def chunker_node(state: AgentState) -> Dict[str, Any]:
         chunks = await chunker_agent.run(file_path=state["file_path"])
         return {"chunks": chunks}
 
-    # --- Phase 2: Parallel Intelligence Core (The NEW Architecture) ---
-    async def embedder_node(state: AgentState) -> Dict[str, Any]:
-        # NOTE: This node will require the `transcript_id` from the persistence step.
-        # We will adjust the graph flow later to handle this dependency.
-        # For now, we define the node's logic.
-        # This highlights a dependency we'll need to solve.
-        pass # Placeholder for now
-
     async def knowledge_analyst_node(state: AgentState) -> Dict[str, Any]:
         result = await knowledge_analyst_agent.run(chunks=state["chunks"], file_path=state["file_path"])
-        return {"extracted_entities": result.get("extracted_entities")}
+        # Populate both new and legacy fields for compatibility
+        return {
+            "extracted_entities": result.get("extracted_entities"),
+            "extracted_data": result.get("extracted_entities") # For backward compatibility
+        }
 
-    # --- Phase 3: Downstream Intelligent Agents ---
-    # These will be upgraded in a future sprint to use the new knowledge core.
-    # For now, their definitions remain the same.
+    async def embedder_node(state: AgentState) -> Dict[str, Any]:
+        if not state.get("transcript_id"):
+            print("   - Halting embedder: missing transcript_id.")
+            return {}
+        await embedder_agent.run(chunks=state["chunks"], transcript_id=state["transcript_id"])
+        return {}
+
+    # --- Legacy Downstream Nodes ---
     async def email_node(state: AgentState) -> Dict[str, Any]:
-        # Temporarily using old 'extractor' logic for compatibility
-        from agents.extractor.extractor import ExtractorAgent
-        temp_extractor = ExtractorAgent(settings)
-        extracted_data = await temp_extractor.run(chunks=state["chunks"])
-        email_draft = await email_agent.run(extracted_data=extracted_data)
+        email_draft = await email_agent.run(extracted_data=state["extracted_data"])
         return {"email_draft": email_draft}
 
-    # ... other agent nodes (social, sales_coach, crm, persistence, historian) remain the same for now ...
+    async def social_node(state: AgentState) -> Dict[str, Any]:
+        social_content = await social_agent.run(chunks=state["chunks"])
+        return {"social_content": social_content}
+        
+    async def sales_coach_node(state: AgentState) -> Dict[str, Any]:
+        coaching_feedback = await sales_coach_agent.run(chunks=state["chunks"])
+        return {"coaching_feedback": coaching_feedback}
 
-    # --- Workflow Construction ---
-    def create_workflow():
+    async def crm_node(state: AgentState) -> Dict[str, Any]:
+        crm_data = await crm_agent.run(
+            extracted_data=state["extracted_data"],
+            chunks=state["chunks"],
+            email_draft=state.get("email_draft"),
+            social_opportunities=state.get("social_content"),
+            coaching_insights=state.get("coaching_feedback")
+        )
+        return {"crm_data": crm_data}
+
+    async def final_persistence_node(state: AgentState) -> Dict[str, Any]:
+        await final_persistence_agent.run(state)
+        return {"db_save_status": {"status": "success"}}
+
+    # --- Master Workflow Construction ---
+    def create_master_workflow():
         workflow = StateGraph(AgentState)
 
-        # Add nodes
+        # Add all nodes
         workflow.add_node("parser", parser_node)
         workflow.add_node("structuring", structuring_node)
+        workflow.add_node("initial_persistence", initial_persistence_node)
         workflow.add_node("chunker", chunker_node)
         workflow.add_node("knowledge_analyst", knowledge_analyst_node)
-        workflow.add_node("email", email_node) # Example downstream agent
+        workflow.add_node("embedder", embedder_node)
+        workflow.add_node("email", email_node)
+        workflow.add_node("social", social_node)
+        workflow.add_node("sales_coach", sales_coach_node)
+        workflow.add_node("crm", crm_node)
+        workflow.add_node("final_persistence", final_persistence_node)
 
-        # Define edges
+        # --- Define the Graph Edges ---
         workflow.set_entry_point("parser")
         workflow.add_edge("parser", "structuring")
-        workflow.add_edge("structuring", "chunker")
+        workflow.add_edge("structuring", "initial_persistence")
+        workflow.add_edge("initial_persistence", "chunker")
 
-        # After chunking, fan out to the knowledge analyst
+        # After chunking, fan out to the two parallel intelligence core agents
         workflow.add_edge("chunker", "knowledge_analyst")
+        workflow.add_edge("chunker", "embedder")
 
-        # After analysis, fan out to downstream agents
+        # After the knowledge analyst runs, fan out to the legacy downstream agents
         workflow.add_edge("knowledge_analyst", "email")
+        workflow.add_edge("knowledge_analyst", "social")
+        workflow.add_edge("knowledge_analyst", "sales_coach")
 
-        # ... other edges will be added ...
+        # Converge legacy agents into the CRM agent
+        workflow.add_edge(["email", "social", "sales_coach"], "crm")
 
-        workflow.add_edge("email", END) # End for now
+        # This is the final join: all work must be complete before the final save.
+        # This includes the parallel embedder and the entire CRM branch.
+        workflow.add_edge(["embedder", "crm"], "final_persistence")
+        
+        workflow.add_edge("final_persistence", END)
 
         return workflow.compile()
 
-    app = create_workflow()
+    app = create_master_workflow()
+
     ```
 
     **Architect's Note:** As you can see from the `embedder_node` placeholder, we've uncovered a critical dependency: the `EmbedderAgent` needs the `transcript_id` from PostgreSQL, but the `PersistenceAgent` (which creates that ID) currently runs at the end of the pipeline. This is a classic workflow challenge that our new architecture must solve. We will address this head-on in the next Sprint when we refactor the persistence logic. For now, we have correctly identified the problem and defined the necessary components.
