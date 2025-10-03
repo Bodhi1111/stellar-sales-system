@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD022 MD032 MD030 MD007 MD031 MD046 MD001 MD025 MD050 MD009 MD024 MD047 MD041 -->
 stellar-sales-system/
 │
 ├── PLAYBOOK/                  # [NEW] The master instructional manual for the project.
