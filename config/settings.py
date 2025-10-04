@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # LLM Settings
     OLLAMA_API_URL: str = "http://localhost:11434/api/generate"
-    LLM_MODEL_NAME: str = "mistral"
+    LLM_MODEL_NAME: str = "deepseek-coder:33b-instruct"
 
     # Project Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent

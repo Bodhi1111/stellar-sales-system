@@ -40,51 +40,51 @@ class PersistenceAgent(BaseAgent):
     async def run(
         self, file_path: Path, chunks: List[str], crm_data: Dict[str, Any],
         social_content: Dict[str, Any], email_draft: str,
-        coaching_feedback: Dict[str, Any] | None = None
+        coaching_feedback: Dict[str, Any] | None = None,
+        transcript_id: str = None
     ):
         print(f"💾 PersistenceAgent saving data for: {file_path.name}")
         full_text = "\\n".join(chunks)
-        transcript_id = None
 
-        # --- Save to PostgreSQL ---
+        # --- Save to PostgreSQL using upsert by external_id ---
         try:
             # Ensure database is initialized
             await db_manager.initialize()
             async with db_manager.session_context() as session:
-                new_transcript = Transcript(
-                    filename=file_path.name, full_text=full_text,
-                    extracted_data=crm_data, social_content=social_content,
-                    email_draft=email_draft
-                )
-                session.add(new_transcript)
+                from sqlalchemy import select
+
+                # Try to find existing record by external_id
+                stmt = select(Transcript).where(Transcript.external_id == transcript_id)
+                result = await session.execute(stmt)
+                existing_transcript = result.scalar_one_or_none()
+
+                if existing_transcript:
+                    # Update existing record
+                    print(f"   Updating existing transcript with external_id: {transcript_id}")
+                    existing_transcript.filename = file_path.name
+                    existing_transcript.full_text = full_text
+                    existing_transcript.extracted_data = crm_data
+                    existing_transcript.social_content = social_content
+                    existing_transcript.email_draft = email_draft
+                else:
+                    # Create new record
+                    print(f"   Creating new transcript with external_id: {transcript_id}")
+                    new_transcript = Transcript(
+                        external_id=transcript_id,
+                        filename=file_path.name,
+                        full_text=full_text,
+                        extracted_data=crm_data,
+                        social_content=social_content,
+                        email_draft=email_draft
+                    )
+                    session.add(new_transcript)
+
                 await session.commit()
-                transcript_id = new_transcript.id
-            print(f"   ✅ Successfully saved transcript metadata to PostgreSQL (ID: {transcript_id}).")
+            print(f"   ✅ Successfully saved transcript metadata to PostgreSQL (external_id: {transcript_id}).")
         except Exception as e:
             import traceback
             print(f"   ❌ ERROR: Failed to save to PostgreSQL: {str(e)}")
             print(f"   Traceback: {traceback.format_exc()}")
             return {"db_save_status": "postgres_error"}
-
-        # --- Create and Save Embeddings to Qdrant ---
-        if transcript_id and chunks:
-            try:
-                print(f"   Creating {len(chunks)} embeddings for Qdrant...")
-                embeddings = self.embedding_model.encode(chunks).tolist()
-
-                self.qdrant_client.upsert(
-                    collection_name=self.collection_name,
-                    points=models.Batch(
-                        ids=[str(uuid.uuid4()) for _ in chunks],
-                        vectors=embeddings,
-                        payloads=[
-                            {"transcript_id": transcript_id, "text": chunk} for chunk in chunks
-                        ]
-                    )
-                )
-                print(f"   ✅ Successfully saved {len(chunks)} embeddings to Qdrant.")
-            except Exception as e:
-                print(f"   ❌ ERROR: Failed to save embeddings to Qdrant: {e}")
-                return {"db_save_status": "qdrant_error"}
 
         return {"db_save_status": "success"}

@@ -24,9 +24,9 @@ async def run_pipeline(file_path: Path):
         print(f"❌ ERROR: An unexpected error occurred in the pipeline: {e}")
 
 if __name__ == "__main__":
-    test_file = Path("data/transcripts/test_file.txt")
+    test_file = Path("data/transcripts/test_sprint01.txt")
     if test_file.exists():
         asyncio.run(run_pipeline(file_path=test_file))
     else:
         print(f"❌ ERROR: Test file not found at {test_file}")
-        print("Please create a test file with the [timestamp] Speaker: text format.")
+        print("Please create a test file with proper header format including transcript_id.")

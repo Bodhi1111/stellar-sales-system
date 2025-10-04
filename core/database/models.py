@@ -8,6 +8,7 @@ class Transcript(Base):
     __tablename__ = 'transcripts'
 
     id = Column(Integer, primary_key=True)
+    external_id = Column(String, unique=True, nullable=False, index=True)  # transcript_id from header
     filename = Column(String, nullable=False)
     full_text = Column(Text, nullable=True)
 
@@ -23,4 +24,4 @@ class Transcript(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     def __repr__(self):
-        return f"<Transcript(id={self.id}, filename='{self.filename}')>"
+        return f"<Transcript(id={self.id}, external_id='{self.external_id}', filename='{self.filename}')>"

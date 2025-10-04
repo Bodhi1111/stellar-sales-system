@@ -526,6 +526,6 @@ class AgentState(TypedDict):
 
     ```
 
-    **Architect's Note:** As you can see from the `embedder_node` placeholder, we've uncovered a critical dependency: the `EmbedderAgent` needs the `transcript_id` from PostgreSQL, but the `PersistenceAgent` (which creates that ID) currently runs at the end of the pipeline. This is a classic workflow challenge that our new architecture must solve. We will address this head-on in the next Sprint when we refactor the persistence logic. For now, we have correctly identified the problem and defined the necessary components.
+    **Architect's Note:** As you can see from the `embedder_node` placeholder, we've uncovered a critical dependency: the `EmbedderAgent` needs the `transcript_id`
 
 ---
