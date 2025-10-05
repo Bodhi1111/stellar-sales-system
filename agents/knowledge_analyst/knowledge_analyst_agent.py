@@ -1,24 +1,27 @@
-# This is the new, enhanced code for agents/knowledge_analyst/knowledge_analyst_agent.py
+# Enhanced KnowledgeAnalystAgent with DeepSeek-Coder optimizations
 
 import json
-import requests
 from typing import List, Dict, Any
 from pathlib import Path
 
 from agents.base_agent import BaseAgent
 from config.settings import Settings
 from core.database.neo4j import neo4j_manager
+from core.llm_client import LLMClient
 
 class KnowledgeAnalystAgent(BaseAgent):
     """
     Analyzes transcript chunks using a Map-Reduce strategy to extract
-    a comprehensive set of entities for the Neo4j knowledge graph,
-    ensuring no data is lost from long transcripts.
+    a comprehensive set of entities for the Neo4j knowledge graph.
+
+    Optimized for DeepSeek-Coder 33B model with:
+    - Structured JSON schema outputs
+    - Step-by-step reasoning instructions
+    - Robust timeout and retry handling
     """
     def __init__(self, settings: Settings):
         super().__init__(settings)
-        self.api_url = settings.OLLAMA_API_URL
-        self.model_name = settings.LLM_MODEL_NAME
+        self.llm_client = LLMClient(settings, timeout=180, max_retries=2)
 
     def _get_required_fields_prompt(self) -> str:
         """
@@ -48,59 +51,111 @@ class KnowledgeAnalystAgent(BaseAgent):
         """
 
     async def _map_chunks_to_facts(self, chunks: List[str]) -> str:
-        """MAP STEP: Analyzes each chunk individually to extract raw facts."""
+        """
+        MAP STEP: Analyzes each chunk individually to extract raw facts.
+        Uses DeepSeek-Coder optimized prompts with structured output.
+        """
         all_facts = []
         failed_chunks = []
+
         for i, chunk in enumerate(chunks):
             print(f"   -> Mapping chunk {i+1}/{len(chunks)} to facts...")
-            prompt = f"""
-            You are a fact-extraction specialist. Read the following excerpt from a sales transcript and extract any and all potential facts related to the following fields. Do not infer or summarize, just extract raw data points.
 
-            Required Fields of Interest:
-            {self._get_required_fields_prompt()}
+            # Optimized prompt for DeepSeek-Coder with step-by-step instructions
+            prompt = f"""TASK: Extract sales data from transcript excerpt
 
-            Transcript Excerpt:
-            ---
-            {chunk}
-            ---
+INSTRUCTIONS:
+1. Read the transcript excerpt carefully
+2. Extract ONLY facts that are explicitly stated (no inference)
+3. Use bullet points for each fact found
+4. If a field is not mentioned, skip it
 
-            Extracted Facts (use bullet points):
-            """
-            payload = {"model": self.model_name, "prompt": prompt, "stream": False}
-            try:
-                response = requests.post(self.api_url, json=payload).json().get("response", "")
-                if response:
-                    all_facts.append(response)
-            except Exception as e:
+REQUIRED FIELDS:
+{self._get_required_fields_prompt()}
+
+TRANSCRIPT EXCERPT:
+---
+{chunk}
+---
+
+EXTRACTED FACTS (bullet points):
+"""
+
+            result = self.llm_client.generate(
+                prompt=prompt,
+                format_json=False,
+                timeout=90  # 90s timeout per chunk
+            )
+
+            if result["success"]:
+                all_facts.append(result["response"])
+                print(f"      ✅ Chunk {i+1} processed in {result['elapsed_time']:.1f}s")
+            else:
                 failed_chunks.append(i+1)
-                print(f"      - Warning: Could not process chunk {i+1}: {e}")
+                print(f"      ❌ Chunk {i+1} failed: {result['error']}")
 
         if failed_chunks:
             print(f"   ⚠️ Failed to process chunks: {failed_chunks}")
+
         return "\n".join(all_facts)
 
     async def _reduce_facts_to_json(self, all_facts: str) -> Dict[str, Any]:
-        """REDUCE STEP: Synthesizes aggregated facts into a single JSON object."""
-        print("   -> Reducing all extracted facts into a final JSON object...")
-        prompt = f"""
-        You are a data synthesis expert. You will be given a list of raw, unordered facts extracted from a sales transcript. Your job is to analyze all these facts and consolidate them into a single, structured JSON object.
-
-        Use the following fields. If a fact is not present, use a null value, an empty list, or 0 for numeric fields.
-        {self._get_required_fields_prompt()}
-
-        List of Raw Facts:
-        ---
-        {all_facts}
-        ---
-
-        Respond ONLY with the final, consolidated JSON object.
         """
-        payload = {"model": self.model_name, "prompt": prompt, "format": "json", "stream": False}
-        try:
-            response_json_str = requests.post(self.api_url, json=payload).json().get("response", "{}")
-            return json.loads(response_json_str)
-        except Exception as e:
-            print(f"      - Error: Could not reduce facts to JSON: {e}")
+        REDUCE STEP: Synthesizes aggregated facts into a single JSON object.
+        Uses DeepSeek-Coder's JSON generation capabilities with schema definition.
+        """
+        print("   -> Reducing all extracted facts into a final JSON object...")
+
+        # Optimized prompt with explicit JSON schema for DeepSeek-Coder
+        prompt = f"""TASK: Consolidate extracted facts into structured JSON
+
+INSTRUCTIONS:
+1. Read all the extracted facts below
+2. Merge and consolidate duplicate information
+3. Output ONLY valid JSON with the exact schema provided
+4. Use null for missing strings, [] for missing arrays, 0 for missing numbers
+
+JSON SCHEMA:
+{{
+  "transcript_id": "string or null",
+  "meeting_date": "string or null",
+  "client_name": "string or null",
+  "spouse_name": "string or null",
+  "client_email": "string or null",
+  "client_phone_number": "string or null",
+  "client_state": "string or null",
+  "marital_status": "string or null",
+  "children_count": number,
+  "estate_value": number,
+  "real_estate_count": number,
+  "real_estate_locations": ["array", "of", "strings"],
+  "llc_interest": "string or null",
+  "deal": number,
+  "deposit": number,
+  "products_discussed": ["array", "of", "strings"],
+  "objections_raised": ["array", "of", "strings"],
+  "meeting_outcome": "string or null",
+  "next_steps": ["array", "of", "strings"]
+}}
+
+RAW FACTS:
+---
+{all_facts}
+---
+
+OUTPUT (valid JSON only):
+"""
+
+        result = self.llm_client.generate_json(
+            prompt=prompt,
+            timeout=120  # 2 minute timeout for reduce step
+        )
+
+        if result["success"]:
+            print(f"   ✅ Facts reduced successfully in {result['elapsed_time']:.1f}s")
+            return result["data"]
+        else:
+            print(f"   ❌ Failed to reduce facts: {result['error']}")
             return {}
 
     async def run(self, chunks: List[str], file_path: Path) -> Dict[str, Any]:

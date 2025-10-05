@@ -1,10 +1,13 @@
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient, models
 from config.settings import settings
+from typing import Optional
+
 
 class QdrantManager:
     """
     Manages all interactions with the Qdrant vector database.
+    Enhanced with filtered search capability for targeted queries.
     """
     def __init__(self, settings):
         self.client = QdrantClient(url=settings.QDRANT_URL)
@@ -25,16 +28,27 @@ class QdrantManager:
                 )
             )
 
-    def search(self, query: str, limit: int = 3) -> list:
+    # --- ENHANCED SEARCH METHOD ---
+    def search(self, query: str, limit: int = 3, filter: Optional[models.Filter] = None) -> list:
         """
         Takes a text query, creates an embedding, and searches Qdrant.
+        Now supports an optional filter for targeted searches.
+
+        Args:
+            query: Text query to search for
+            limit: Maximum number of results to return
+            filter: Optional Qdrant filter for targeted searches (e.g., by doc_type)
+
+        Returns:
+            List of search results from Qdrant
         """
         query_embedding = self.embedding_model.encode(query).tolist()
 
         search_results = self.client.search(
             collection_name=self.collection_name,
             query_vector=query_embedding,
-            limit=limit
+            limit=limit,
+            query_filter=filter  # Use the provided filter
         )
         return search_results
 

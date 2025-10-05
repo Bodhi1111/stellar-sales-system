@@ -8,22 +8,47 @@ Stellar Sales System is a multi-agent sales intelligence platform built with Fas
 
 ## Architecture
 
-### Core Pipeline Flow
-The system uses LangGraph to orchestrate a multi-agent workflow defined in `orchestrator/graph.py`:
+The system implements a **dual workflow architecture** with two independent LangGraph workflows:
 
-1. **Sequential Processing Phase**:
-   - ParserAgent → StructuringAgent → ChunkerAgent → ExtractorAgent
+### Workflow 1: Ingestion Pipeline (Sprint 01)
+**Purpose**: Process sales transcripts into structured data and store in databases
 
-2. **Parallel Processing Phase** (Fan-out from ExtractorAgent):
-   - CRMAgent - Extracts CRM-ready data
-   - EmailAgent - Generates follow-up email drafts
-   - SocialAgent - Creates social media content
-   - SalesCoachAgent - Provides coaching feedback
-   - HistorianAgent - Tracks conversation history
-   - PersistenceAgent - Handles database operations
+**Flow**:
+1. **Sequential Processing**: Parser → Structuring → Chunker
+2. **Intelligence First (Parallel)**: Knowledge Analyst (Neo4j) + Embedder (Qdrant)
+3. **Legacy Downstream**: Email, Social, Sales Coach agents
+4. **CRM Aggregation**: Consolidate all insights
+5. **Persistence**: Save to PostgreSQL with upsert by `external_id`
 
-3. **Convergence Phase**:
-   - All agents converge back to PersistenceAgent for final data persistence
+**Entry Point**: `file_path` in AgentState
+**Export**: `app = create_master_workflow()`
+
+### Workflow 2: Reasoning Engine (Sprint 02)
+**Purpose**: Answer user queries through dynamic planning, execution, and self-correction
+
+**Flow**:
+```
+Gatekeeper (ambiguity check)
+    ↓
+Planner (create execution plan)
+    ↓
+Tool Executor → Auditor → Router
+    ↑                        ↓
+Replanner (if low confidence) ← (decision logic)
+                             ↓
+                        Strategist (synthesize answer)
+```
+
+**Cognitive Nodes**:
+- **GatekeeperAgent**: Validates query clarity, requests clarification if ambiguous
+- **PlannerAgent**: Decomposes request into step-by-step tool calls
+- **Tool Executor**: Executes specialist tools (sales_copilot, crm, email)
+- **AuditorAgent**: Verifies tool outputs with confidence scores (1-5)
+- **Router**: Pure function routing to next step, replanner, or strategist
+- **StrategistAgent**: Synthesizes final answer from all intermediate steps
+
+**Entry Point**: `original_request` in AgentState
+**Export**: `reasoning_app = create_reasoning_workflow()`
 
 ### Database Architecture
 - **PostgreSQL**: Primary relational database for structured data
@@ -69,6 +94,17 @@ make run-api
 # - Ollama API: http://localhost:11434
 ```
 
+### Testing Workflows
+```bash
+# Test ingestion pipeline (Sprint 01)
+./venv/bin/python orchestrator/pipeline.py
+
+# Test reasoning engine (Sprint 02)
+./venv/bin/python scripts/test_reasoning_workflow.py
+./venv/bin/python scripts/test_reasoning_complete.py
+./venv/bin/python scripts/test_reasoning_simple.py
+```
+
 ## Agent Development
 
 Each agent follows a consistent pattern in `agents/{agent_name}/{agent_name}_agent.py`:
@@ -87,8 +123,19 @@ To add a new agent:
 
 Environment variables (`.env`):
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`: PostgreSQL credentials
-- LLM configuration defaults to Ollama with Mistral model
+- **LLM configuration**: Ollama with **DeepSeek-Coder 33B Instruct** model
+  - Model size: 18.8GB
+  - Optimized for structured data extraction and JSON generation
+  - Average inference time: 30-60s per request
+  - Configured in `config/settings.py`: `LLM_MODEL_NAME = "deepseek-coder:33b-instruct"`
 - Neo4j and Qdrant use default local settings
+
+### LLM Client
+All agents use the centralized `core/llm_client.py` which provides:
+- **Timeout handling**: 120s default (configurable per agent)
+- **Retry logic**: 3 attempts with exponential backoff
+- **JSON validation**: Automatic parsing and validation of JSON responses
+- **Error handling**: Graceful degradation with detailed error messages
 
 ## API Usage
 

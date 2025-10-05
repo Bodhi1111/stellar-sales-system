@@ -15,6 +15,7 @@ class Transcript(Base):
     # Storing structured data from our agents
     extracted_data = Column(JSON)
     social_content = Column(JSON)
+    crm_data = Column(JSON)  # NEW: Added field to store CRMAgent output
 
     # Storing the generated email draft
     email_draft = Column(Text)

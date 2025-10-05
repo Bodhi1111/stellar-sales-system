@@ -1,90 +1,80 @@
-import uuid
+from typing import Dict, Any
 from pathlib import Path
-from typing import Dict, Any, List
-from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient, models
+from sqlalchemy.dialects.postgresql import insert
 
 from agents.base_agent import BaseAgent
-from config.settings import Settings, settings
+from config.settings import Settings
 from core.database.postgres import db_manager
 from core.database.models import Transcript
 
+
 class PersistenceAgent(BaseAgent):
     """
-    Handles all database persistence:
-    1. Saves transcript metadata to PostgreSQL.
-    2. Creates and saves vector embeddings to Qdrant.
+    Handles the final persistence of all extracted and generated data into
+    the PostgreSQL database. It uses the transcript_id (stored as external_id)
+    to create or update the record, making the operation idempotent.
     """
-    def __init__(self, settings: Settings):
-        super().__init__(settings)
-        print("   Loading embedding model (this may take a moment)...")
-        self.embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
-        self.qdrant_client = QdrantClient(url=settings.QDRANT_URL)
-        self.collection_name = "transcripts"
-        self._ensure_qdrant_collection_exists()
-        print("   Embedding model and Qdrant client ready.")
 
-    def _ensure_qdrant_collection_exists(self):
-        """Creates the Qdrant collection if it doesn't already exist."""
+    async def run(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Saves the complete, final record to the database.
+
+        Args:
+            data: Dict containing:
+                - transcript_id: Unique identifier from transcript header
+                - file_path: Path to the transcript file
+                - chunks: List of text chunks
+                - extracted_entities: Extracted data from KnowledgeAnalystAgent
+                - social_content: Social media content
+                - email_draft: Generated email
+                - crm_data: CRM-ready data
+
+        Returns:
+            Dict with "persistence_status": "success" or "error"
+        """
+        if not data:
+            return {"persistence_status": "error", "message": "No data provided."}
+
+        transcript_id = data.get("transcript_id")
+        if not transcript_id:
+            return {"persistence_status": "error", "message": "Missing transcript_id for persistence."}
+
+        file_path = data.get("file_path")
+        if not file_path or not isinstance(file_path, Path):
+            return {"persistence_status": "error", "message": "Invalid or missing file_path."}
+
+        print(f"💾 PersistenceAgent: Saving final record for transcript ID {transcript_id}...")
+
         try:
-            self.qdrant_client.get_collection(collection_name=self.collection_name)
-        except Exception:
-            self.qdrant_client.recreate_collection(
-                collection_name=self.collection_name,
-                vectors_config=models.VectorParams(
-                    size=self.embedding_model.get_sentence_embedding_dimension(),
-                    distance=models.Distance.COSINE
-                )
-            )
-
-    async def run(
-        self, file_path: Path, chunks: List[str], crm_data: Dict[str, Any],
-        social_content: Dict[str, Any], email_draft: str,
-        coaching_feedback: Dict[str, Any] | None = None,
-        transcript_id: str = None
-    ):
-        print(f"💾 PersistenceAgent saving data for: {file_path.name}")
-        full_text = "\\n".join(chunks)
-
-        # --- Save to PostgreSQL using upsert by external_id ---
-        try:
-            # Ensure database is initialized
             await db_manager.initialize()
             async with db_manager.session_context() as session:
-                from sqlalchemy import select
 
-                # Try to find existing record by external_id
-                stmt = select(Transcript).where(Transcript.external_id == transcript_id)
-                result = await session.execute(stmt)
-                existing_transcript = result.scalar_one_or_none()
+                upsert_data = {
+                    "external_id": transcript_id,
+                    "filename": file_path.name,
+                    "full_text": "\n".join(data.get("chunks", [])),
+                    "extracted_data": data.get("extracted_entities", {}),
+                    "social_content": data.get("social_content", {}),
+                    "email_draft": data.get("email_draft", ""),
+                    "crm_data": data.get("crm_data", {})  # Now correctly included
+                }
 
-                if existing_transcript:
-                    # Update existing record
-                    print(f"   Updating existing transcript with external_id: {transcript_id}")
-                    existing_transcript.filename = file_path.name
-                    existing_transcript.full_text = full_text
-                    existing_transcript.extracted_data = crm_data
-                    existing_transcript.social_content = social_content
-                    existing_transcript.email_draft = email_draft
-                else:
-                    # Create new record
-                    print(f"   Creating new transcript with external_id: {transcript_id}")
-                    new_transcript = Transcript(
-                        external_id=transcript_id,
-                        filename=file_path.name,
-                        full_text=full_text,
-                        extracted_data=crm_data,
-                        social_content=social_content,
-                        email_draft=email_draft
-                    )
-                    session.add(new_transcript)
+                stmt = insert(Transcript).values(upsert_data)
 
+                # Define what to do on conflict (if the external_id already exists)
+                update_dict = {key: stmt.excluded[key] for key in upsert_data.keys() if key != 'external_id'}
+
+                on_conflict_stmt = stmt.on_conflict_do_update(
+                    index_elements=['external_id'],
+                    set_=update_dict
+                )
+
+                await session.execute(on_conflict_stmt)
                 await session.commit()
-            print(f"   ✅ Successfully saved transcript metadata to PostgreSQL (external_id: {transcript_id}).")
-        except Exception as e:
-            import traceback
-            print(f"   ❌ ERROR: Failed to save to PostgreSQL: {str(e)}")
-            print(f"   Traceback: {traceback.format_exc()}")
-            return {"db_save_status": "postgres_error"}
 
-        return {"db_save_status": "success"}
+            print(f"   ✅ Successfully saved final record for transcript ID {transcript_id}.")
+            return {"persistence_status": "success"}
+
+        except Exception as e:
+            print(f"   ❌ ERROR in PersistenceAgent: {type(e).__name__}: {e}")
+            return {"persistence_status": "error", "message": str(e)}
