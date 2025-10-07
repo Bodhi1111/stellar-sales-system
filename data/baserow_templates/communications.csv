@@ -1,0 +1,2 @@
+external_id,client_external_id,meeting_external_id,comm_type,content,sent_at,status
+12345678,12345678,12345678,Email,"Thanks for your time today. Here are next steps...",2025-10-03,Draft
