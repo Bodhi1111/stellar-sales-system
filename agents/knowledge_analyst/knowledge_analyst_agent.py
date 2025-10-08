@@ -1,13 +1,15 @@
-# Enhanced KnowledgeAnalystAgent with DeepSeek-Coder optimizations
+# Enhanced KnowledgeAnalystAgent with RAG-based extraction
 
 import json
 from typing import List, Dict, Any
 from pathlib import Path
+from qdrant_client import QdrantClient
 
 from agents.base_agent import BaseAgent
 from config.settings import Settings
 from core.database.neo4j import neo4j_manager
 from core.llm_client import LLMClient
+
 
 class KnowledgeAnalystAgent(BaseAgent):
     """
@@ -19,9 +21,12 @@ class KnowledgeAnalystAgent(BaseAgent):
     - Step-by-step reasoning instructions
     - Robust timeout and retry handling
     """
+
     def __init__(self, settings: Settings):
         super().__init__(settings)
         self.llm_client = LLMClient(settings, timeout=180, max_retries=2)
+        self.qdrant_client = QdrantClient(url=settings.QDRANT_URL)
+        self.collection_name = "transcripts"
 
     def _get_required_fields_prompt(self) -> str:
         """
@@ -50,19 +55,12 @@ class KnowledgeAnalystAgent(BaseAgent):
         - "next_steps": a list of action items
         """
 
-    async def _map_chunks_to_facts(self, chunks: List[str]) -> str:
-        """
-        MAP STEP: Analyzes each chunk individually to extract raw facts.
-        Uses DeepSeek-Coder optimized prompts with structured output.
-        """
-        all_facts = []
-        failed_chunks = []
+    async def _process_single_chunk(self, chunk: str, index: int, total: int) -> tuple:
+        """Process a single chunk and return (index, result, success)"""
+        print(f"   -> Mapping chunk {index+1}/{total} to facts...")
 
-        for i, chunk in enumerate(chunks):
-            print(f"   -> Mapping chunk {i+1}/{len(chunks)} to facts...")
-
-            # Optimized prompt for DeepSeek-Coder with step-by-step instructions
-            prompt = f"""TASK: Extract sales data from transcript excerpt
+        # Optimized prompt for DeepSeek-Coder with step-by-step instructions
+        prompt = f"""TASK: Extract sales data from transcript excerpt
 
 INSTRUCTIONS:
 1. Read the transcript excerpt carefully
@@ -81,18 +79,49 @@ TRANSCRIPT EXCERPT:
 EXTRACTED FACTS (bullet points):
 """
 
-            result = self.llm_client.generate(
-                prompt=prompt,
-                format_json=False,
-                timeout=90  # 90s timeout per chunk
-            )
+        result = self.llm_client.generate(
+            prompt=prompt,
+            format_json=False,
+            timeout=90  # 90s timeout per chunk
+        )
 
-            if result["success"]:
-                all_facts.append(result["response"])
-                print(f"      ✅ Chunk {i+1} processed in {result['elapsed_time']:.1f}s")
+        if result["success"]:
+            print(f"      ✅ Chunk {index+1} processed in {result['elapsed_time']:.1f}s")
+            return (index, result["response"], True)
+        else:
+            print(f"      ❌ Chunk {index+1} failed: {result['error']}")
+            return (index, result['error'], False)
+
+    async def _map_chunks_to_facts(self, chunks: List[str]) -> str:
+        """
+        MAP STEP: Analyzes each chunk individually to extract raw facts.
+        Uses parallel processing for faster execution with local LLM.
+        """
+        import asyncio
+
+        print(f"   🚀 Processing {len(chunks)} chunks in parallel...")
+
+        # Create tasks for all chunks
+        tasks = [
+            self._process_single_chunk(chunk, i, len(chunks))
+            for i, chunk in enumerate(chunks)
+        ]
+
+        # Process all chunks in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect successful results and track failures
+        all_facts = []
+        failed_chunks = []
+
+        for index, response, success in results:
+            if isinstance(response, Exception):
+                failed_chunks.append(index + 1)
+                print(f"      ❌ Chunk {index+1} exception: {response}")
+            elif success:
+                all_facts.append(response)
             else:
-                failed_chunks.append(i+1)
-                print(f"      ❌ Chunk {i+1} failed: {result['error']}")
+                failed_chunks.append(index + 1)
 
         if failed_chunks:
             print(f"   ⚠️ Failed to process chunks: {failed_chunks}")
@@ -122,16 +151,25 @@ JSON SCHEMA:
   "client_name": "string or null",
   "spouse_name": "string or null",
   "client_email": "string or null",
-  "client_phone_number": "string or null",
+  "client_phone_number": "number or null",
   "client_state": "string or null",
   "marital_status": "string or null",
-  "children_count": number,
-  "estate_value": number,
-  "real_estate_count": number,
+  "children_count": number or null,
+  "estate_value": number or null,
+  "real_estate_count": number or null,
   "real_estate_locations": ["array", "of", "strings"],
   "llc_interest": "string or null",
-  "deal": number,
-  "deposit": number,
+  "deal": number or null,
+  "deposit": number or null,
+  "products_discussed": ["array", "of", "strings"],
+  "objections_raised": ["array", "of", "strings"],
+  "meeting_outcome": "string or null",
+  "next_steps": ["array", "of", "strings"]
+}}
+  "real_estate_locations": ["array", "of", "strings"],
+  "llc_interest": "number or null",
+  "deal": number or null,
+  "deposit": number or null,
   "products_discussed": ["array", "of", "strings"],
   "objections_raised": ["array", "of", "strings"],
   "meeting_outcome": "string or null",
@@ -152,23 +190,64 @@ OUTPUT (valid JSON only):
         )
 
         if result["success"]:
-            print(f"   ✅ Facts reduced successfully in {result['elapsed_time']:.1f}s")
+            print(
+                f"   ✅ Facts reduced successfully in {result['elapsed_time']:.1f}s")
             return result["data"]
         else:
             print(f"   ❌ Failed to reduce facts: {result['error']}")
             return {}
 
-    async def run(self, chunks: List[str], file_path: Path) -> Dict[str, Any]:
-        """Analyzes transcript, extracts entities, and saves them to Neo4j."""
+    async def _retrieve_relevant_chunks(self, transcript_id: str, top_k: int = 15) -> List[str]:
+        """
+        Retrieve most relevant chunks from Qdrant for the given transcript.
+        Uses simple scroll to get all chunks for this transcript_id.
+        """
+        print(f"   🔍 Retrieving chunks from Qdrant for transcript {transcript_id}...")
+
+        try:
+            # Scroll through all points for this transcript
+            results = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter={
+                    "must": [
+                        {"key": "transcript_id", "match": {"value": transcript_id}}
+                    ]
+                },
+                limit=top_k,
+                with_payload=True
+            )
+
+            chunks = [point.payload["text"] for point in results[0]]
+            print(f"      ✅ Retrieved {len(chunks)} chunks from Qdrant")
+            return chunks
+
+        except Exception as e:
+            print(f"      ❌ ERROR retrieving from Qdrant: {e}")
+            return []
+
+    async def run(self, transcript_id: str, file_path: Path) -> Dict[str, Any]:
+        """
+        NEW RAG-BASED APPROACH: Query Qdrant for chunks, then extract entities.
+        This eliminates the LLM map phase bottleneck.
+        """
         print(f"📊 KnowledgeAnalystAgent: Analyzing transcript for {file_path.name}...")
 
+        # Retrieve chunks from Qdrant (already embedded and stored)
+        chunks = await self._retrieve_relevant_chunks(transcript_id, top_k=15)
+
+        if not chunks:
+            print("   - No chunks found in Qdrant, skipping analysis.")
+            return {"knowledge_graph_status": "skipped", "extracted_entities": {}}
+
+        # Now do a single-pass extraction (no map phase, just reduce)
         extracted_facts = await self._map_chunks_to_facts(chunks)
         if not extracted_facts:
-             print("   - No facts extracted, skipping analysis.")
-             return {"knowledge_graph_status": "skipped", "extracted_entities": {}}
+            print("   - No facts extracted, skipping analysis.")
+            return {"knowledge_graph_status": "skipped", "extracted_entities": {}}
 
         extracted_entities = await self._reduce_facts_to_json(extracted_facts)
-        print(f"   -> Final extracted entities: {json.dumps(extracted_entities, indent=2)}")
+        print(
+            f"   -> Final extracted entities: {json.dumps(extracted_entities, indent=2)}")
 
         try:
             client_name = extracted_entities.get("client_name")
@@ -229,7 +308,8 @@ OUTPUT (valid JSON only):
                     {"filename": file_path.name, "product_name": product}
                 )
 
-            print(f"   ✅ Successfully updated knowledge graph for {file_path.name}.")
+            print(
+                f"   ✅ Successfully updated knowledge graph for {file_path.name}.")
             return {
                 "knowledge_graph_status": "success",
                 "extracted_entities": extracted_entities

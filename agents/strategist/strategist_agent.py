@@ -58,7 +58,8 @@ class StrategistAgent(BaseAgent):
                 remaining = self.max_context_chars - total_chars
                 if remaining > 100:  # Only add if meaningful space left
                     truncated = output_str[:remaining - 50] + "... (truncated)"
-                    context_parts.append(f"STEP {i} - {tool_name}:\n{truncated}\n")
+                    context_parts.append(
+                        f"STEP {i} - {tool_name}:\n{truncated}\n")
                 break
 
             context_parts.append(step_summary)

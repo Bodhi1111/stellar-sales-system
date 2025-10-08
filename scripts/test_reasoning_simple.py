@@ -1,15 +1,14 @@
 """
 Test script with a simple, clear query.
 """
+from orchestrator.graph import reasoning_app
+from orchestrator.state import AgentState
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from orchestrator.state import AgentState
-from orchestrator.graph import reasoning_app
 
 
 async def test_simple_workflow():
@@ -64,7 +63,8 @@ async def test_simple_workflow():
         print(f"\n🔧 Steps Executed: {len(result['intermediate_steps'])}")
 
     if result.get("verification_history"):
-        avg_score = sum(v['confidence_score'] for v in result['verification_history']) / len(result['verification_history'])
+        avg_score = sum(v['confidence_score']
+                        for v in result['verification_history']) / len(result['verification_history'])
         print(f"📊 Avg Confidence: {avg_score:.1f}/5")
 
     print("\n" + "=" * 70)

@@ -12,6 +12,7 @@ from pathlib import Path
 from agents.base_agent import BaseAgent
 from config.settings import Settings
 
+
 class CRMAgent(BaseAgent):
     """
     CRM Agent that captures all required fields for estate planning business.
@@ -33,10 +34,12 @@ class CRMAgent(BaseAgent):
         ]
 
         # Define outcome statuses
-        self.outcome_choices = ["Won", "Lost", "Pending", "Follow-up Scheduled", "Needs More Info"]
+        self.outcome_choices = ["Won", "Lost", "Pending",
+                                "Follow-up Scheduled", "Needs More Info"]
 
         # Define marital status options
-        self.marital_status_choices = ["Single", "Married", "Divorced", "Widowed", "Separated"]
+        self.marital_status_choices = [
+            "Single", "Married", "Divorced", "Widowed", "Separated"]
 
     async def run(
         self,
@@ -79,7 +82,8 @@ class CRMAgent(BaseAgent):
                 extracted_data, chunks, email_draft, social_opportunities, coaching_insights, file_path
             )
 
-            print(f"   🎯 Generated comprehensive CRM record with {len(crm_record)} fields")
+            print(
+                f"   🎯 Generated comprehensive CRM record with {len(crm_record)} fields")
             return crm_record
 
         except Exception as e:
@@ -154,7 +158,8 @@ class CRMAgent(BaseAgent):
             "coaching_insights": coaching_insights,
 
             # === SYSTEM DATA ===
-            "crm_data_populated": json.dumps(extracted_data),  # Full extracted data as JSON blob
+            # Full extracted data as JSON blob
+            "crm_data_populated": json.dumps(extracted_data),
 
             # === ENHANCEMENT METADATA ===
             "data_sources_count": self._count_data_sources(email_draft, social_opportunities, coaching_insights),
@@ -239,7 +244,8 @@ class CRMAgent(BaseAgent):
                     # Convert numeric strings to numbers
                     if key in ["children_count", "estate_value", "real_estate_count", "deal_amount", "deposit_amount"]:
                         try:
-                            cleaned_result[key] = float(value) if '.' in str(value) else int(value)
+                            cleaned_result[key] = float(
+                                value) if '.' in str(value) else int(value)
                         except (ValueError, TypeError):
                             cleaned_result[key] = 0
                     else:
@@ -408,19 +414,24 @@ class CRMAgent(BaseAgent):
     def _count_data_sources(self, email_draft: str, social_opportunities: Dict[str, Any], coaching_insights: Dict[str, Any]) -> int:
         """Count how many data sources were integrated"""
         count = 1  # Base extraction always counts
-        if email_draft: count += 1
-        if social_opportunities: count += 1
-        if coaching_insights: count += 1
+        if email_draft:
+            count += 1
+        if social_opportunities:
+            count += 1
+        if coaching_insights:
+            count += 1
         return count
 
     def _validate_and_clean_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and clean the CRM record"""
         # Ensure numeric fields are actually numeric
-        numeric_fields = ["children_count", "estate_value", "real_estate_count", "deal", "deposit"]
+        numeric_fields = ["children_count", "estate_value",
+                          "real_estate_count", "deal", "deposit"]
         for field in numeric_fields:
             if field in record:
                 try:
-                    record[field] = float(record[field]) if '.' in str(record[field]) else int(record[field])
+                    record[field] = float(record[field]) if '.' in str(
+                        record[field]) else int(record[field])
                 except (ValueError, TypeError):
                     record[field] = 0
 

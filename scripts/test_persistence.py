@@ -1,15 +1,14 @@
 """
 Test script for updated PersistenceAgent (Sprint 03, Epic 3.1)
 """
+from config.settings import settings
+from agents.persistence.persistence_agent import PersistenceAgent
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from agents.persistence.persistence_agent import PersistenceAgent
-from config.settings import settings
 
 
 async def test_persistence():

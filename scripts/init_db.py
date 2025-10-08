@@ -2,6 +2,7 @@ import asyncio
 from core.database.postgres import db_manager
 from core.database.models import Base
 
+
 async def create_tables():
     """Connects to the DB and creates all tables defined in models.py."""
     print("Connecting to database to create tables...")

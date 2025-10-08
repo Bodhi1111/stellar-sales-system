@@ -24,11 +24,14 @@ class SalesCopilotAgent(BaseAgent):
     async def _search_qdrant(self, query: str, doc_type: str, limit: int = 3) -> List[Dict]:
         """Performs a targeted, filtered semantic search in Qdrant."""
         try:
-            print(f"   - SalesCopilot: Searching Qdrant for '{query}' with doc_type '{doc_type}'...")
+            print(
+                f"   - SalesCopilot: Searching Qdrant for '{query}' with doc_type '{doc_type}'...")
             qdrant_filter = models.Filter(
-                must=[models.FieldCondition(key="doc_type", match=models.MatchValue(value=doc_type))]
+                must=[models.FieldCondition(
+                    key="doc_type", match=models.MatchValue(value=doc_type))]
             )
-            search_results = self.qdrant_manager.search(query=query, limit=limit, filter=qdrant_filter)
+            search_results = self.qdrant_manager.search(
+                query=query, limit=limit, filter=qdrant_filter)
             return [result.payload for result in search_results]
         except Exception as e:
             return [{"error": f"Qdrant search failed: {str(e)}"}]
@@ -65,15 +68,18 @@ class SalesCopilotAgent(BaseAgent):
 
                 objections = await self._search_neo4j(
                     "MATCH (c:Client)-[:PARTICIPATED_IN]->(m)-[:CONTAINED]->(o:Objection) WHERE c.name =~ $client_name RETURN o.text as objection LIMIT 1",
-                    {"client_name": f"(?i){client_name}"}  # Case-insensitive regex
+                    # Case-insensitive regex
+                    {"client_name": f"(?i){client_name}"}
                 )
 
                 if objections and "error" not in objections[0]:
                     objection_text = objections[0]['objection']
                     vector_results = await self._search_qdrant(query=objection_text, doc_type="transcript_chunk")
-                    results = {"strategy": "multi_step", "graph_results": objections, "vector_results": vector_results}
+                    results = {"strategy": "multi_step",
+                               "graph_results": objections, "vector_results": vector_results}
                 else:
-                    results = {"error": f"No objections found for client '{client_name}'."}
+                    results = {
+                        "error": f"No objections found for client '{client_name}'."}
             else:
                 print("   - Strategy: Simple Vector Search (Qdrant)")
                 # Default to searching transcript chunks if not specified
@@ -82,7 +88,8 @@ class SalesCopilotAgent(BaseAgent):
                     doc_type = "email_draft"  # Simple routing based on keywords
 
                 vector_results = await self._search_qdrant(query=query, doc_type=doc_type)
-                results = {"strategy": "vector_search", "results": vector_results}
+                results = {"strategy": "vector_search",
+                           "results": vector_results}
 
             return {"response": results}
 

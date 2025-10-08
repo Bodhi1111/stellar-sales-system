@@ -4,10 +4,12 @@ from typing import Dict, Any
 from agents.base_agent import BaseAgent
 from config.settings import Settings, settings
 
+
 class EmailAgent(BaseAgent):
     """
     This agent takes extracted data and drafts a follow-up email.
     """
+
     def __init__(self, settings: Settings):
         super().__init__(settings)
         self.api_url = settings.OLLAMA_API_URL
@@ -16,7 +18,8 @@ class EmailAgent(BaseAgent):
     def _construct_prompt(self, extracted_data: Dict[str, Any]) -> str:
         """Constructs a prompt for the LLM to draft an email."""
         customer_name = extracted_data.get("customer_name", "Valued Client")
-        action_items = extracted_data.get("action_items", "our recent discussion.")
+        action_items = extracted_data.get(
+            "action_items", "our recent discussion.")
 
         prompt = f"""
         You are a helpful assistant for a Trust and Estate Planning firm.
@@ -34,14 +37,15 @@ class EmailAgent(BaseAgent):
         print(f"📧 EmailAgent received data: {extracted_data}")
         prompt = self._construct_prompt(extracted_data)
 
-        payload = { "model": self.model_name, "prompt": prompt, "stream": False }
+        payload = {"model": self.model_name, "prompt": prompt, "stream": False}
 
         try:
             response = requests.post(self.api_url, json=payload)
             response.raise_for_status()
 
             response_data = response.json()
-            email_draft = response_data.get("response", "Could not generate email draft.")
+            email_draft = response_data.get(
+                "response", "Could not generate email draft.")
 
             print(f"   LLM successfully drafted email.")
             return email_draft

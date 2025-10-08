@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 from orchestrator.graph import app
 
+
 async def run_pipeline(file_path: Path):
     """
     Reads a file and runs the full, advanced LangGraph pipeline.
@@ -12,7 +13,7 @@ async def run_pipeline(file_path: Path):
         raw_text = file_path.read_text(encoding='utf-8')
 
         # Provide the initial state for our new graph
-        initial_state = { "file_path": file_path, "raw_text": raw_text }
+        initial_state = {"file_path": file_path, "raw_text": raw_text}
 
         # Run the graph
         async for event in app.astream(initial_state):
@@ -29,4 +30,5 @@ if __name__ == "__main__":
         asyncio.run(run_pipeline(file_path=test_file))
     else:
         print(f"❌ ERROR: Test file not found at {test_file}")
-        print("Please create a test file with proper header format including transcript_id.")
+        print(
+            "Please create a test file with proper header format including transcript_id.")

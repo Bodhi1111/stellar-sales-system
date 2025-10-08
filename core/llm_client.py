@@ -106,7 +106,8 @@ class LLMClient:
             except requests.exceptions.Timeout:
                 if attempt < self.max_retries:
                     wait_time = 2 ** attempt  # Exponential backoff: 2s, 4s, 8s
-                    print(f"   ⚠️ LLM request timed out (attempt {attempt}/{self.max_retries}). Retrying in {wait_time}s...")
+                    print(
+                        f"   ⚠️ LLM request timed out (attempt {attempt}/{self.max_retries}). Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                 else:
                     return {
@@ -118,7 +119,8 @@ class LLMClient:
             except requests.exceptions.RequestException as e:
                 if attempt < self.max_retries:
                     wait_time = 2 ** attempt
-                    print(f"   ⚠️ LLM request failed (attempt {attempt}/{self.max_retries}): {e}. Retrying in {wait_time}s...")
+                    print(
+                        f"   ⚠️ LLM request failed (attempt {attempt}/{self.max_retries}): {e}. Retrying in {wait_time}s...")
                     time.sleep(wait_time)
                 else:
                     return {

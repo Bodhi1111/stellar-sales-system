@@ -66,7 +66,8 @@ class AuditorAgent(BaseAgent):
 
         # Safely serialize tool output for the prompt
         try:
-            tool_output_str = json.dumps(tool_output, ensure_ascii=False, indent=2)
+            tool_output_str = json.dumps(
+                tool_output, ensure_ascii=False, indent=2)
         except Exception:
             tool_output_str = str(tool_output)
 

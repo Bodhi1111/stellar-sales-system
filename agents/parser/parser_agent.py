@@ -4,11 +4,13 @@ from typing import List, Dict, Any, Tuple
 from agents.base_agent import BaseAgent
 from config.settings import Settings, settings
 
+
 class ParserAgent(BaseAgent):
     """
     Parses a raw transcript into a structured format of dialogue turns.
     Also extracts the transcript_id from the file header for use across the system.
     """
+
     def __init__(self, settings: Settings):
         super().__init__(settings)
         # This "regular expression" is a pattern to find and capture
@@ -78,14 +80,16 @@ class ParserAgent(BaseAgent):
                         "text": text.strip()
                     })
 
-            print(f"   Successfully parsed {len(structured_dialogue)} dialogue turns.")
+            print(
+                f"   Successfully parsed {len(structured_dialogue)} dialogue turns.")
             return {
                 "structured_dialogue": structured_dialogue,
                 "transcript_id": transcript_id
             }
 
         except Exception as e:
-            print(f"   ❌ ERROR: An unexpected error occurred during parsing: {e}")
+            print(
+                f"   ❌ ERROR: An unexpected error occurred during parsing: {e}")
             return {
                 "structured_dialogue": [],
                 "transcript_id": None

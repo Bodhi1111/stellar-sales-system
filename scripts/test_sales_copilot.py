@@ -2,15 +2,14 @@
 Test script for upgraded SalesCopilotAgent (Sprint 03, Epic 3.2)
 Tests multi-modal retrieval from Qdrant and Neo4j
 """
+from config.settings import settings
+from agents.sales_copilot.sales_copilot_agent import SalesCopilotAgent
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from agents.sales_copilot.sales_copilot_agent import SalesCopilotAgent
-from config.settings import settings
 
 
 async def test_sales_copilot():

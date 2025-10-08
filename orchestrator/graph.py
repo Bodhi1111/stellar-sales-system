@@ -1,3 +1,4 @@
+from agents.sales_copilot.sales_copilot_agent import SalesCopilotAgent as RealSalesCopilotAgent
 from langgraph.graph import StateGraph, END
 from typing import Dict, Any
 import re
@@ -49,18 +50,19 @@ auditor_agent = AuditorAgent(settings)
 strategist_agent = StrategistAgent(settings)
 
 # Real specialist agent for tool execution (Sprint 03 upgrade)
-from agents.sales_copilot.sales_copilot_agent import SalesCopilotAgent as RealSalesCopilotAgent
 
 sales_copilot_agent = RealSalesCopilotAgent(settings)
 
 # Tool mapping for the Planner (Sprint 03 - Epic 3.3)
 tool_map = {
-    "sales_copilot_tool": sales_copilot_agent,  # Multi-modal librarian (Qdrant + Neo4j)
+    # Multi-modal librarian (Qdrant + Neo4j)
+    "sales_copilot_tool": sales_copilot_agent,
     "crm_tool": crm_agent,  # CRM analytics and metrics
     "email_tool": email_agent,  # Email draft generation
 }
 
 # --- Define Agent Nodes for the Intelligence First Workflow ---
+
 
 async def parser_node(state: AgentState) -> Dict[str, Any]:
     """Parse raw transcript and extract transcript_id from header"""
@@ -70,48 +72,73 @@ async def parser_node(state: AgentState) -> Dict[str, Any]:
         "transcript_id": result["transcript_id"]
     }
 
+
 async def structuring_node(state: AgentState) -> Dict[str, Any]:
     """Analyze conversation phases and structure"""
     conversation_phases = await structuring_agent.run(structured_dialogue=state["structured_dialogue"])
     return {"conversation_phases": conversation_phases}
+
 
 async def chunker_node(state: AgentState) -> Dict[str, Any]:
     """Segment content for optimal processing"""
     chunks = await chunker_agent.run(file_path=state["file_path"])
     return {"chunks": chunks}
 
+
 async def knowledge_analyst_node(state: AgentState) -> Dict[str, Any]:
-    """Extract entities and build knowledge graph"""
-    result = await knowledge_analyst_agent.run(chunks=state["chunks"], file_path=state["file_path"])
+    """Extract entities from Qdrant vectors and build knowledge graph (RAG-based)"""
+    result = await knowledge_analyst_agent.run(
+        transcript_id=state["transcript_id"],
+        file_path=state["file_path"]
+    )
     # Populate both new and legacy fields for compatibility
     return {
         "extracted_entities": result.get("extracted_entities"),
-        "extracted_data": result.get("extracted_entities")  # For backward compatibility
+        # For backward compatibility
+        "extracted_data": result.get("extracted_entities")
     }
 
+
 async def embedder_node(state: AgentState) -> Dict[str, Any]:
-    """Generate and store embeddings in Qdrant"""
+    """Generate and store embeddings in Qdrant with metadata for filtering"""
     if not state.get("transcript_id"):
         print("   - Halting embedder: missing transcript_id.")
         return {}
-    await embedder_agent.run(chunks=state["chunks"], transcript_id=state["transcript_id"])
+
+    # Prepare metadata for embeddings (enables filtering in RAG queries)
+    metadata = {
+        "client_name": state.get("extracted_data", {}).get("client_name", ""),
+        "meeting_date": state.get("extracted_data", {}).get("meeting_date", ""),
+        "conversation_phases": state.get("conversation_phases", [])
+    }
+
+    await embedder_agent.run(
+        chunks=state["chunks"],
+        transcript_id=state["transcript_id"],
+        metadata=metadata
+    )
     return {}
 
 # --- Legacy Downstream Nodes ---
+
+
 async def email_node(state: AgentState) -> Dict[str, Any]:
     """Generate follow-up email drafts"""
     email_draft = await email_agent.run(extracted_data=state["extracted_data"])
     return {"email_draft": email_draft}
+
 
 async def social_node(state: AgentState) -> Dict[str, Any]:
     """Generate social media content"""
     social_content = await social_agent.run(chunks=state["chunks"])
     return {"social_content": social_content}
 
+
 async def sales_coach_node(state: AgentState) -> Dict[str, Any]:
     """Provide coaching feedback"""
     coaching_feedback = await sales_coach_agent.run(chunks=state["chunks"])
     return {"coaching_feedback": coaching_feedback}
+
 
 async def crm_node(state: AgentState) -> Dict[str, Any]:
     """Aggregate all insights for CRM"""
@@ -123,6 +150,7 @@ async def crm_node(state: AgentState) -> Dict[str, Any]:
         coaching_insights=state.get("coaching_feedback")
     )
     return {"crm_data": crm_data}
+
 
 async def persistence_node(state: AgentState) -> Dict[str, Any]:
     """Save all data to PostgreSQL"""
@@ -138,6 +166,8 @@ async def persistence_node(state: AgentState) -> Dict[str, Any]:
     return {"db_save_status": result}
 
 # --- Master Workflow Construction ---
+
+
 def create_master_workflow():
     """
     Creates the Intelligence First workflow:
@@ -162,14 +192,15 @@ def create_master_workflow():
     workflow.add_node("crm", crm_node)
     workflow.add_node("persistence", persistence_node)
 
-    # --- Define the Graph Edges ---
+    # --- Define the Graph Edges (NEW: Embedder-First Architecture) ---
     workflow.set_entry_point("parser")
     workflow.add_edge("parser", "structuring")
     workflow.add_edge("structuring", "chunker")
 
-    # After chunking, fan out to the two parallel intelligence core agents
-    workflow.add_edge("chunker", "knowledge_analyst")
+    # NEW FLOW: Embedder runs FIRST to populate Qdrant (fast)
+    # Then Knowledge Analyst queries the vectors (RAG-based extraction)
     workflow.add_edge("chunker", "embedder")
+    workflow.add_edge("embedder", "knowledge_analyst")
 
     # After the knowledge analyst runs, fan out to the legacy downstream agents
     workflow.add_edge("knowledge_analyst", "email")
@@ -179,15 +210,15 @@ def create_master_workflow():
     # Converge legacy agents into the CRM agent
     workflow.add_edge(["email", "social", "sales_coach"], "crm")
 
-    # This is the final join: all work must be complete before the final save.
-    # This includes the parallel embedder and the entire CRM branch.
-    workflow.add_edge(["embedder", "crm"], "persistence")
+    # Final persistence (no longer needs to wait for embedder separately)
+    workflow.add_edge("crm", "persistence")
 
     workflow.add_edge("persistence", END)
 
     return workflow.compile()
 
 # --- Reasoning Engine Workflow (Sprint 02) ---
+
 
 def _parse_tool_call_safely(tool_call: str) -> tuple:
     """
@@ -201,15 +232,18 @@ def _parse_tool_call_safely(tool_call: str) -> tuple:
         return match.group(1), match.group(2)
     return None, None
 
+
 async def gatekeeper_node(state: AgentState) -> Dict[str, Any]:
     """Check if user request is specific enough"""
     result = await gatekeeper_agent.run(data={"original_request": state["original_request"]})
     return {"clarification_question": result.get("clarification_question")}
 
+
 async def planner_node(state: AgentState) -> Dict[str, Any]:
     """Create step-by-step execution plan"""
     result = await planner_agent.run(data={"original_request": state["original_request"]})
     return {"plan": result.get("plan", ["FINISH"])}
+
 
 async def tool_executor_node(state: AgentState) -> Dict[str, Any]:
     """Executes the next tool in the plan safely"""
@@ -223,7 +257,8 @@ async def tool_executor_node(state: AgentState) -> Dict[str, Any]:
     tool_name, tool_input = _parse_tool_call_safely(next_step)
 
     if not tool_name or tool_name not in tool_map:
-        error_output = {"error": f"Tool '{tool_name}' not found or call is malformed."}
+        error_output = {
+            "error": f"Tool '{tool_name}' not found or call is malformed."}
         new_step = {
             "tool_name": tool_name or "unknown",
             "tool_input": tool_input or "",
@@ -251,6 +286,7 @@ async def tool_executor_node(state: AgentState) -> Dict[str, Any]:
         "plan": plan[1:]
     }
 
+
 async def auditor_node(state: AgentState) -> Dict[str, Any]:
     """Verify the last tool output"""
     if not state.get("intermediate_steps"):
@@ -267,10 +303,12 @@ async def auditor_node(state: AgentState) -> Dict[str, Any]:
         "verification_history": verification_history + [result]
     }
 
+
 async def replanner_node(state: AgentState) -> Dict[str, Any]:
     """Clears the plan to force replanning"""
     print("   🔄 Clearing plan for replanning...")
     return {"plan": []}
+
 
 async def strategist_node(state: AgentState) -> Dict[str, Any]:
     """Synthesize final answer from intermediate steps"""
@@ -279,6 +317,7 @@ async def strategist_node(state: AgentState) -> Dict[str, Any]:
         "intermediate_steps": state.get("intermediate_steps", [])
     })
     return {"final_response": result["final_response"]}
+
 
 def router_node(state: AgentState) -> str:
     """
@@ -305,6 +344,7 @@ def router_node(state: AgentState) -> str:
 
     # Continue with next tool
     return "tool_executor"
+
 
 def create_reasoning_workflow():
     """
@@ -350,6 +390,7 @@ def create_reasoning_workflow():
     workflow.add_edge("strategist", END)
 
     return workflow.compile()
+
 
 # Export both workflows
 app = create_master_workflow()

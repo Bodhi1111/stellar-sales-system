@@ -2,15 +2,14 @@
 Test script for the aligned Epic 2.3 implementation.
 Tests the complete reasoning workflow as specified in the playbook.
 """
+from orchestrator.graph import reasoning_app
+from orchestrator.state import AgentState
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from orchestrator.state import AgentState
-from orchestrator.graph import reasoning_app
 
 
 async def test_aligned_workflow():
@@ -63,12 +62,14 @@ async def test_aligned_workflow():
     if result.get("intermediate_steps"):
         print(f"\n🔧 Steps Executed: {len(result['intermediate_steps'])}")
         for i, step in enumerate(result['intermediate_steps'], 1):
-            print(f"   {i}. {step['tool_name']}: {step.get('tool_output', {})}")
+            print(
+                f"   {i}. {step['tool_name']}: {step.get('tool_output', {})}")
 
     if result.get("verification_history"):
         print(f"\n✅ Verifications:")
         for i, v in enumerate(result['verification_history'], 1):
-            print(f"   Step {i}: Score {v['confidence_score']}/5 - {v['reasoning']}")
+            print(
+                f"   Step {i}: Score {v['confidence_score']}/5 - {v['reasoning']}")
 
     if result.get("final_response"):
         print(f"\n🎯 Final Answer:")

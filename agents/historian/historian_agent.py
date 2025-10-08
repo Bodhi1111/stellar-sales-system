@@ -3,11 +3,13 @@ from agents.base_agent import BaseAgent
 from config.settings import Settings, settings
 from core.database.neo4j import neo4j_manager
 
+
 class HistorianAgent(BaseAgent):
     """
     This agent takes the final processed data and saves it to the 
     Neo4j knowledge graph to build long-term memory.
     """
+
     def __init__(self, settings: Settings):
         super().__init__(settings)
 
@@ -17,7 +19,8 @@ class HistorianAgent(BaseAgent):
         try:
             file_path = state.get("file_path")
             extracted_data = state.get("extracted_data", {})
-            customer_name = extracted_data.get("customer_name", "Unknown Client")
+            customer_name = extracted_data.get(
+                "customer_name", "Unknown Client")
             main_objection = extracted_data.get("main_objection")
 
             # For clean testing, clear any old data for this file

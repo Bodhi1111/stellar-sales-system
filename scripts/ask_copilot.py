@@ -3,6 +3,7 @@ import sys
 from agents.sales_copilot.sales_copilot_agent import SalesCopilotAgent
 from config.settings import settings
 
+
 async def main(question: str):
     """
     Initializes and runs the SalesCopilotAgent with a user's question.

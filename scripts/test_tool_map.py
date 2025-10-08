@@ -1,14 +1,13 @@
 """
 Test script to verify tool_map works with all three tools (Epic 3.3)
 """
+from orchestrator.graph import tool_map
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from orchestrator.graph import tool_map
 
 
 async def test_tool_map():
@@ -52,7 +51,8 @@ async def test_tool_map():
     print(f"\n✅ Tools with data dict interface: {tools_with_data_interface}")
     if tools_needing_upgrade:
         print(f"⚠️ Tools needing interface upgrade: {tools_needing_upgrade}")
-        print(f"   These agents need: async def run(self, data: Dict[str, Any]) -> Dict[str, Any]")
+        print(
+            f"   These agents need: async def run(self, data: Dict[str, Any]) -> Dict[str, Any]")
 
     print("=" * 70)
 

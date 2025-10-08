@@ -1,15 +1,14 @@
 """
 Test script for complete reasoning workflow without clarification.
 """
+from orchestrator.graph import reasoning_app
+from orchestrator.state import AgentState
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from orchestrator.state import AgentState
-from orchestrator.graph import reasoning_app
 
 
 async def test_complete_workflow():
@@ -70,9 +69,11 @@ async def test_complete_workflow():
                 print(f"   {i}. {tool_name}: {output}")
 
         if result.get("verification_history"):
-            print(f"\n✅ VERIFICATIONS ({len(result['verification_history'])}):")
+            print(
+                f"\n✅ VERIFICATIONS ({len(result['verification_history'])}):")
             for i, v in enumerate(result["verification_history"], 1):
-                print(f"   Step {i}: {v['confidence_score']}/5 - {v['reasoning']}")
+                print(
+                    f"   Step {i}: {v['confidence_score']}/5 - {v['reasoning']}")
 
         if result.get("final_response"):
             print(f"\n🎯 FINAL RESPONSE:")

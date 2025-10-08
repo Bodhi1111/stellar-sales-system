@@ -4,10 +4,12 @@ from typing import List, Dict, Any
 from agents.base_agent import BaseAgent
 from config.settings import Settings, settings
 
+
 class SalesCoachAgent(BaseAgent):
     """
     This agent analyzes transcript chunks to provide sales coaching feedback.
     """
+
     def __init__(self, settings: Settings):
         super().__init__(settings)
         self.api_url = settings.OLLAMA_API_URL
@@ -36,9 +38,11 @@ class SalesCoachAgent(BaseAgent):
         return prompt
 
     async def run(self, chunks: List[str]) -> Dict[str, Any]:
-        print(f"👨‍🏫 SalesCoachAgent received {len(chunks)} chunks. Analyzing performance...")
+        print(
+            f"👨‍🏫 SalesCoachAgent received {len(chunks)} chunks. Analyzing performance...")
         prompt = self._construct_prompt(chunks)
-        payload = { "model": self.model_name, "prompt": prompt, "format": "json", "stream": False }
+        payload = {"model": self.model_name, "prompt": prompt,
+                   "format": "json", "stream": False}
 
         try:
             response = requests.post(self.api_url, json=payload)

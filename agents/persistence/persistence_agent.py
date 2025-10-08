@@ -48,7 +48,8 @@ class PersistenceAgent(BaseAgent):
         if not file_path or not isinstance(file_path, Path):
             return {"persistence_status": "error", "message": "Invalid or missing file_path."}
 
-        print(f"💾 PersistenceAgent: Saving final record for transcript ID {transcript_id}...")
+        print(
+            f"💾 PersistenceAgent: Saving final record for transcript ID {transcript_id}...")
 
         try:
             await db_manager.initialize()
@@ -61,13 +62,15 @@ class PersistenceAgent(BaseAgent):
                     "extracted_data": data.get("extracted_entities", {}),
                     "social_content": data.get("social_content", {}),
                     "email_draft": data.get("email_draft", ""),
-                    "crm_data": data.get("crm_data", {})  # Now correctly included
+                    # Now correctly included
+                    "crm_data": data.get("crm_data", {})
                 }
 
                 stmt = insert(Transcript).values(upsert_data)
 
                 # Define what to do on conflict (if the external_id already exists)
-                update_dict = {key: stmt.excluded[key] for key in upsert_data.keys() if key != 'external_id'}
+                update_dict = {
+                    key: stmt.excluded[key] for key in upsert_data.keys() if key != 'external_id'}
 
                 on_conflict_stmt = stmt.on_conflict_do_update(
                     index_elements=['external_id'],
@@ -77,7 +80,8 @@ class PersistenceAgent(BaseAgent):
                 await session.execute(on_conflict_stmt)
                 await session.commit()
 
-            print(f"   ✅ Successfully saved final record to PostgreSQL for transcript ID {transcript_id}.")
+            print(
+                f"   ✅ Successfully saved final record to PostgreSQL for transcript ID {transcript_id}.")
 
             # Sync to Baserow (non-blocking - don't fail the whole pipeline if Baserow fails)
             try:
@@ -85,13 +89,16 @@ class PersistenceAgent(BaseAgent):
                 if crm_data:
                     baserow_result = await self.baserow_manager.sync_crm_data(crm_data, transcript_id)
                     if baserow_result.get("status") == "success":
-                        print(f"   ✅ Successfully synced to Baserow for transcript ID {transcript_id}.")
+                        print(
+                            f"   ✅ Successfully synced to Baserow for transcript ID {transcript_id}.")
                     else:
-                        print(f"   ⚠️ Baserow sync failed: {baserow_result.get('error')}")
+                        print(
+                            f"   ⚠️ Baserow sync failed: {baserow_result.get('error')}")
                 else:
                     print(f"   ⚠️ No CRM data to sync to Baserow.")
             except Exception as baserow_error:
-                print(f"   ⚠️ Baserow sync failed (non-critical): {baserow_error}")
+                print(
+                    f"   ⚠️ Baserow sync failed (non-critical): {baserow_error}")
 
             return {"persistence_status": "success"}
 

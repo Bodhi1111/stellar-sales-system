@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from config.settings import settings
 
+
 class DatabaseManager:
     def __init__(self):
         self.engine = None
@@ -15,7 +16,8 @@ class DatabaseManager:
                 f"postgresql+asyncpg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@"
                 f"{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
             )
-            self.engine = create_async_engine(db_url, pool_size=10, max_overflow=5)
+            self.engine = create_async_engine(
+                db_url, pool_size=10, max_overflow=5)
             self.session_maker = sessionmaker(
                 bind=self.engine, class_=AsyncSession, expire_on_commit=False
             )
@@ -34,7 +36,7 @@ class DatabaseManager:
         """Provides a clean way to handle database sessions."""
         if not self.session_maker:
             await self.initialize()
-    
+
         session = self.session_maker()
         try:
             yield session
@@ -43,6 +45,7 @@ class DatabaseManager:
             raise
         finally:
             await session.close()
+
 
 # Create a single, global instance that the whole app can share
 db_manager = DatabaseManager()

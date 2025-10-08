@@ -1,11 +1,10 @@
 from abc import ABC, abstractmethod
 from config.settings import Settings
 
+
 class BaseAgent(ABC):
-    """
-    An abstract base class for all agents in the system.
-    It provides a common interface and shared setup functionality.
-    """
+    """Abstract base class for agents."""
+
     def __init__(self, settings: Settings):
         self.settings = settings
         print(f"✅ Initialized {self.__class__.__name__}")

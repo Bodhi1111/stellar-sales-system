@@ -9,9 +9,11 @@ class QdrantManager:
     Manages all interactions with the Qdrant vector database.
     Enhanced with filtered search capability for targeted queries.
     """
+
     def __init__(self, settings):
         self.client = QdrantClient(url=settings.QDRANT_URL)
-        self.embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+        self.embedding_model = SentenceTransformer(
+            settings.EMBEDDING_MODEL_NAME)
         self.collection_name = "transcripts"
         self._ensure_collection_exists()
 
@@ -51,6 +53,7 @@ class QdrantManager:
             query_filter=filter  # Use the provided filter
         )
         return search_results
+
 
 # Create a single, global instance for the app to use
 qdrant_manager = QdrantManager(settings)

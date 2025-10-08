@@ -1,15 +1,14 @@
 """
 Test Baserow integration by uploading a sample transcript
 """
+from config.settings import settings
+from orchestrator.graph import app
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from orchestrator.graph import app
-from config.settings import settings
 
 
 async def test_baserow_integration():

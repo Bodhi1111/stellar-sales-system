@@ -1,15 +1,14 @@
 """
 Direct test of Baserow integration (without running full pipeline)
 """
+from config.settings import settings
+from core.database.baserow import BaserowManager
 import asyncio
 import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from core.database.baserow import BaserowManager
-from config.settings import settings
 
 
 async def test_baserow_direct():
@@ -26,40 +25,48 @@ async def test_baserow_direct():
         print(f"   - Clients table ID: {baserow_manager.clients_table_id}")
         print(f"   - Meetings table ID: {baserow_manager.meetings_table_id}")
         print(f"   - Deals table ID: {baserow_manager.deals_table_id}")
-        print(f"   - Communications table ID: {baserow_manager.communications_table_id}")
-        print(f"   - Sales Coaching table ID: {baserow_manager.sales_coaching_table_id}")
+        print(
+            f"   - Communications table ID: {baserow_manager.communications_table_id}")
+        print(
+            f"   - Sales Coaching table ID: {baserow_manager.sales_coaching_table_id}")
     except Exception as e:
         print(f"   ❌ Failed to initialize: {e}")
         return
 
-    # Create mock CRM data
+    # Create mock CRM data - NEW TEST with different data
     print("\n2️⃣ Creating mock CRM data...")
+
+    # Generate a new unique transcript ID for this test
+    import random
+    transcript_id = str(random.randint(80000000, 89999999))
+
     mock_crm_data = {
-        "client_name": "John and Jane Doe",
-        "client_email": "johndoe@example.com",
-        "customer_name": "John and Jane Doe",  # Fallback field
+        "client_name": "Michael and Sarah Chen",
+        "client_email": "mchen@techcorp.com",
+        "customer_name": "Michael and Sarah Chen",  # Fallback field
         "marital_status": "Married",
-        "children_count": 2,
-        "estate_value": 500000,
-        "real_estate_count": 1,
-        "llc_interest": "Tech startup LLC",
-        "meeting_date": "2025-10-07",
-        "transcript_filename": "test_baserow_direct.txt",
-        "transcript_summary": "Initial estate planning consultation discussing trust setup and life insurance options.",
-        "outcome": "Follow-up Scheduled",
-        "product_discussed": "Estate Planning, Trust Services",
-        "deal": 15000,
-        "deposit": 5000,
-        "objections_raised": "Concerns about pricing and timeline",
-        "action_items": "Schedule follow-up call; Send trust setup documentation",
-        "follow_up_email_draft": "Dear John and Jane, Thank you for meeting with me today...",
-        "email_draft": "Dear John and Jane, Thank you for meeting with me today...",
-        "social_media_quote": "Estate planning isn't just about assets—it's about protecting the people you love.",
-        "coaching_opportunities": "Strong rapport building; Could improve objection handling around pricing"
+        "children_count": 3,
+        "estate_value": 850000,
+        "real_estate_count": 2,
+        "llc_interest": "Real estate investment LLC",
+        "meeting_date": "2025-10-08",
+        "transcript_filename": "test_new_client_2025_10_08.txt",
+        "transcript_summary": "Second meeting to review Sub-trust options and LLC formation for real estate holdings. Clients very interested in asset protection strategies.",
+        "outcome": "Won",
+        "product_discussed": "Estate Planning, Trust Services, LLC Formation",
+        "deal": 22500,
+        "deposit": 7500,
+        "objections_raised": "Questions about timing for LLC setup",
+        "action_items": "Send LLC formation documents; Schedule closing call for next week",
+        "follow_up_email_draft": "Dear Michael and Sarah, It was great meeting with you today to discuss your estate protection needs...",
+        "email_draft": "Dear Michael and Sarah, It was great meeting with you today to discuss your estate protection needs...",
+        "social_media_quote": "Protecting your family's future starts with the right planning today.",
+        "coaching_opportunities": "Excellent presentation of Sub-trust benefits; Successfully addressed timing concerns with concrete next steps"
     }
 
-    transcript_id = "62022857"  # Test transcript ID
-    print(f"   ✅ Mock data created for transcript ID: {transcript_id}")
+    print(f"   ✅ Mock data created for NEW transcript ID: {transcript_id}")
+    print(f"   📋 Client: Michael and Sarah Chen")
+    print(f"   💰 Deal Amount: ${mock_crm_data['deal']}")
 
     # Test Baserow sync
     print("\n3️⃣ Syncing to Baserow...")
@@ -74,7 +81,8 @@ async def test_baserow_direct():
             print("✅ Baserow sync successful!")
             print(f"   - External ID: {result.get('external_id')}")
             print(f"\n📊 Check Baserow UI: http://localhost:8080")
-            print(f"   Look for data in all 5 tables with external_id = {result.get('external_id')}")
+            print(
+                f"   Look for data in all 5 tables with external_id = {result.get('external_id')}")
         else:
             print("❌ Baserow sync failed")
             print(f"   Error: {result.get('error')}")

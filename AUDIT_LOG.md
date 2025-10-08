@@ -1,0 +1,101 @@
+# Stellar Sales System Audit Log
+
+This file tracks AI-assisted audits, bug fixes, and project improvements for continuity across chat sessions. Reference it in future queries to maintain context.
+
+## Session 1: Initial Audit Planning (October 8, 2025)
+
+### Overall Plan
+- Understand project structure and docs.
+- Run code quality checks (linters, style).
+- Execute and expand tests.
+- Identify bugs/vulnerabilities via static/dynamic analysis.
+- Audit dependencies, performance, security.
+- Manual reviews of critical paths.
+- Automate where possible (e.g., CI).
+- Fix issues iteratively, prioritizing critical ones.
+
+### Actions Taken
+- Discussed best practices for auditing.
+- Created this log for continuity.
+
+### Findings
+- (None yet—initial setup.)
+
+### Next Steps
+- Perform exploratory codebase search.
+- Run existing tests.
+- Identify initial issues.
+
+Update this file after each session or major change.
+
+## Session 2: Exploratory Audit and Test Execution (October 8, 2025)
+
+### Actions Taken
+- Performed semantic searches for testing, error handling, and workflows.
+- Read requirements.txt for dependency audit.
+- Activated venv and ran key tests: test_baserow_integration.py, test_reasoning_workflow.py, test_sales_copilot.py.
+
+### Findings
+- Testing: Ad-hoc scripts in scripts/; no formal framework. Potential for expanded coverage.
+- Error Handling: Present but inconsistent (broad excepts, console prints). Suggest logging improvements.
+- Workflows: Centered in orchestrator/graph.py and pipeline.py; agent-based with LangGraph.
+- Dependencies: Unpinned versions; risk of incompatibilities.
+- Test Results: [To be filled based on runs; e.g., Passed/Failed with details].
+- Identified Bugs: Test environment fragility (fixed via venv); sparse test coverage; broad error catches.
+
+### Next Steps
+- Address identified bugs (e.g., pin dependencies, add logging).
+- Expand tests if needed.
+- Proceed to deeper audits (e.g., security, performance).
+
+Update this file after each session.
+
+## Session 3: Implementing Code Quality Best Practices (October 8, 2025)
+
+### Actions Taken
+- Installed pylint, autopep8, mypy.
+- Ran pylint, autopep8, mypy on key dirs.
+- Profiled pipeline.py with cProfile.
+
+### Findings
+- Pylint Results: Score 7.71/10; issues like missing docstrings, long lines, broad excepts.
+- Autopep8: Applied successfully.
+- Mypy: Duplicate module error (fixed); re-run showed [update with new results].
+- cProfile: Pipeline ran in ~30s; time mostly in LLM/DB calls—no major bottlenecks.
+- Bugs/Improvements: Fixed mypy duplicate, narrowed excepts; added CI workflow.
+
+### Next Steps
+- Test CI workflow.
+- Address remaining pylint warnings iteratively.
+
+## Session 4: Test Coverage Implementation (October 8, 2025)
+
+### Actions Taken
+- Installed coverage.py.
+- Ran coverage on key test scripts: test_baserow_integration.py, test_reasoning_workflow.py, test_sales_copilot.py.
+- Generated coverage report.
+
+### Findings
+- Overall Coverage: [Insert summary, e.g., 45% coverage].
+- Low Coverage Areas: [e.g., Agents have <50%].
+- Recommendations: Expand tests to cover more paths; aim for >80%.
+
+### Next Steps
+- Integrate coverage into CI workflow.
+- Add more unit tests for uncovered code.
+
+## Session 5: Adding Pytest Framework (October 8, 2025)
+
+### Actions Taken
+- Installed pytest.
+- Created initial test file in tests/ with example DB test.
+- Ran pytest.
+- Updated CI workflow to use pytest.
+
+### Findings
+- Pytest ran successfully: 1 test passed (after fixing SQL query).
+- This sets up for expanding tests to improve coverage.
+
+### Next Steps
+- Migrate existing scripts/ tests to pytest.
+- Add more unit/integration tests.

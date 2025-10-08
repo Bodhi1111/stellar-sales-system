@@ -1,6 +1,7 @@
 import asyncio
 from sqlalchemy import text
-from core.database.postgres import db_manager # Importing our new manager
+from core.database.postgres import db_manager  # Importing our new manager
+
 
 async def main():
     """

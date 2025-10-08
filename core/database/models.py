@@ -4,11 +4,13 @@ from sqlalchemy.sql import func
 
 Base = declarative_base()
 
+
 class Transcript(Base):
     __tablename__ = 'transcripts'
 
     id = Column(Integer, primary_key=True)
-    external_id = Column(String, unique=True, nullable=False, index=True)  # transcript_id from header
+    external_id = Column(String, unique=True, nullable=False,
+                         index=True)  # transcript_id from header
     filename = Column(String, nullable=False)
     full_text = Column(Text, nullable=True)
 

@@ -7,6 +7,7 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
 class Neo4jManager:
     _instance = None
     _driver = None
@@ -32,7 +33,8 @@ class Neo4jManager:
 
                 for attempt in range(max_retries):
                     try:
-                        logger.info(f"Attempting to connect to Neo4j at {self.uri} (attempt {attempt + 1}/{max_retries})")
+                        logger.info(
+                            f"Attempting to connect to Neo4j at {self.uri} (attempt {attempt + 1}/{max_retries})")
                         start_time = time.time()
 
                         self._driver = AsyncGraphDatabase.driver(
@@ -51,13 +53,16 @@ class Neo4jManager:
                         )
 
                         elapsed = time.time() - start_time
-                        logger.info(f"✅ Neo4j driver initialized successfully in {elapsed:.2f}s")
+                        logger.info(
+                            f"✅ Neo4j driver initialized successfully in {elapsed:.2f}s")
                         return self._driver
 
                     except asyncio.TimeoutError:
-                        logger.error(f"Neo4j connection timeout on attempt {attempt + 1}")
+                        logger.error(
+                            f"Neo4j connection timeout on attempt {attempt + 1}")
                     except Exception as e:
-                        logger.error(f"Failed to initialize Neo4j driver (attempt {attempt + 1}): {type(e).__name__}: {e}")
+                        logger.error(
+                            f"Failed to initialize Neo4j driver (attempt {attempt + 1}): {type(e).__name__}: {e}")
 
                     # Clean up failed connection
                     if self._driver:
@@ -73,7 +78,8 @@ class Neo4jManager:
                         await asyncio.sleep(retry_delay)
 
                 # All retries failed
-                raise ConnectionError(f"Failed to connect to Neo4j after {max_retries} attempts")
+                raise ConnectionError(
+                    f"Failed to connect to Neo4j after {max_retries} attempts")
 
             return self._driver
 
@@ -158,6 +164,7 @@ class Neo4jManager:
         except Exception as e:
             logger.error(f"Neo4j health check failed: {e}")
             return False
+
 
 # Global instance
 neo4j_manager = Neo4jManager()

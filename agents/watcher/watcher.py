@@ -7,8 +7,10 @@ from agents.base_agent import BaseAgent
 from config.settings import settings
 from orchestrator.pipeline import run_pipeline
 
+
 class FileCreationHandler(FileSystemEventHandler):
     """A handler that calls the async pipeline when a file is created."""
+
     def __init__(self, loop):
         self.loop = loop
 
@@ -17,12 +19,14 @@ class FileCreationHandler(FileSystemEventHandler):
             print(f"📄 New file detected: {event.src_path}")
             # Safely call our async pipeline from this synchronous thread
             asyncio.run_coroutine_threadsafe(
-                run_pipeline(file_path=Path(event.src_path)), 
+                run_pipeline(file_path=Path(event.src_path)),
                 self.loop
             )
 
+
 class WatcherAgent(BaseAgent):
     """This agent watches a directory and triggers the main pipeline."""
+
     def __init__(self, settings):
         super().__init__(settings)
         self.path_to_watch = str(settings.WATCHER_DIRECTORY)
@@ -41,6 +45,7 @@ class WatcherAgent(BaseAgent):
         finally:
             observer.stop()
             observer.join()
+
 
 # This block allows us to test the agent
 if __name__ == "__main__":

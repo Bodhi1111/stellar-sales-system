@@ -2,6 +2,8 @@
 Test script for the Reasoning Engine workflow (Sprint 02).
 Tests: Gatekeeper → Planner → Tool Executor → Auditor → Router → Strategist
 """
+from orchestrator.graph import reasoning_app
+from orchestrator.state import AgentState
 import asyncio
 import sys
 from pathlib import Path
@@ -9,9 +11,6 @@ from pathlib import Path
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
-from orchestrator.state import AgentState
-from orchestrator.graph import reasoning_app
 
 
 async def test_reasoning_workflow():
@@ -76,7 +75,8 @@ async def test_reasoning_workflow():
                 tool_name = step.get("tool_name", "Unknown")
                 output = step.get("tool_output", "No output")
                 print(f"   {i}. {tool_name}")
-                print(f"      Output: {output[:100]}..." if len(str(output)) > 100 else f"      Output: {output}")
+                print(f"      Output: {output[:100]}..." if len(
+                    str(output)) > 100 else f"      Output: {output}")
 
         # Display verification history
         if result.get("verification_history"):

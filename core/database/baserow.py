@@ -8,6 +8,7 @@ Uses baserow-client library with procedural API (not OOP table objects)
 import json
 import requests
 from typing import Dict, Any, Optional, List
+from datetime import datetime
 from baserow.client import BaserowClient
 from baserow.filter import Filter, FilterMode, FilterType
 from config.settings import Settings
@@ -25,7 +26,8 @@ class BaserowManager:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.client = BaserowClient(url=settings.BASEROW_URL, token=settings.BASEROW_TOKEN)
+        self.client = BaserowClient(
+            url=settings.BASEROW_URL, token=settings.BASEROW_TOKEN)
 
         # Store table IDs for API calls (procedural API requires table_id parameter)
         self.clients_table_id = settings.BASEROW_CLIENTS_ID
@@ -38,10 +40,13 @@ class BaserowManager:
         # This is required because baserow-client needs field IDs (field_6790) not names (external_id)
         print("📋 Initializing Baserow field mappings...")
         self.clients_field_map = self._get_field_mapping(self.clients_table_id)
-        self.meetings_field_map = self._get_field_mapping(self.meetings_table_id)
+        self.meetings_field_map = self._get_field_mapping(
+            self.meetings_table_id)
         self.deals_field_map = self._get_field_mapping(self.deals_table_id)
-        self.communications_field_map = self._get_field_mapping(self.communications_table_id)
-        self.sales_coaching_field_map = self._get_field_mapping(self.sales_coaching_table_id)
+        self.communications_field_map = self._get_field_mapping(
+            self.communications_table_id)
+        self.sales_coaching_field_map = self._get_field_mapping(
+            self.sales_coaching_table_id)
         print(f"   ✅ Field mappings loaded for 5 tables")
 
     async def sync_crm_data(self, crm_data: Dict[str, Any], transcript_id: str) -> Dict[str, Any]:
@@ -55,15 +60,18 @@ class BaserowManager:
         Returns:
             Dict with sync status
         """
-        print(f"📊 BaserowManager: Syncing data for transcript {transcript_id}...")
+        print(
+            f"📊 BaserowManager: Syncing data for transcript {transcript_id}...")
 
         try:
             # Convert transcript_id to integer for Baserow (number field)
-            external_id = int(transcript_id) if transcript_id.isdigit() else hash(transcript_id) % 10**8
+            external_id = int(transcript_id) if transcript_id.isdigit(
+            ) else hash(transcript_id) % 10**8
 
             # Step 1: Upsert Client
             client_row = await self._upsert_client(crm_data, external_id)
-            print(f"   ✅ Client synced: {client_row.get('client_name')} (external_id: {external_id})")
+            print(
+                f"   ✅ Client synced: {client_row.get('client_name')} (external_id: {external_id})")
 
             # Step 2: Upsert Meeting
             meeting_row = await self._upsert_meeting(crm_data, external_id)
@@ -113,7 +121,8 @@ class BaserowManager:
             # Create mapping: field_name → field_id
             return {field['name']: f"field_{field['id']}" for field in fields}
         except Exception as e:
-            print(f"   ⚠️ Warning: Could not fetch field mapping for table {table_id}: {e}")
+            print(
+                f"   ⚠️ Warning: Could not fetch field mapping for table {table_id}: {e}")
             return {}
 
     def _transform_to_field_ids(self, data: Dict[str, Any], field_map: Dict[str, str]) -> Dict[str, Any]:
@@ -133,34 +142,125 @@ class BaserowManager:
             if field_id:
                 transformed[field_id] = value
             else:
-                print(f"   ⚠️ Warning: Field '{field_name}' not found in Baserow schema, skipping")
+                print(
+                    f"   ⚠️ Warning: Field '{field_name}' not found in Baserow schema, skipping")
         return transformed
 
-    def _find_row_by_external_id(self, table_id: int, external_id: int) -> Optional[Dict[str, Any]]:
-        """Find existing row by external_id using baserow-client API"""
+    def _find_row_by_external_id(self, table_id: int, external_id: int, field_map: Dict[str, str]) -> Optional[Dict[str, Any]]:
+        """
+        Find existing row by external_id using baserow-client API.
+
+        CRITICAL: baserow-client Filter requires field ID (e.g., "field_6790") not field name (e.g., "external_id")
+        """
+        print(
+            f"   🔍 DEBUG: Searching for existing row in table {table_id} with external_id={external_id}")
+
         try:
-            # Use Filter to search by external_id
+            # Get the field ID for "external_id" from the field mapping
+            external_id_field_id = field_map.get("external_id")
+            if not external_id_field_id:
+                print(
+                    f"      ❌ ERROR: 'external_id' field not found in field mapping for table {table_id}")
+                return None
+
+            # Use Filter with FIELD ID (not field name)
             filter_obj = Filter(
-                field="external_id",
-                filter=FilterMode.equal,  # FilterMode.equal, not FilterType.EQUAL
-                value=external_id  # Can be int, no need to convert to string
+                field=external_id_field_id,  # FIXED: Use field ID like "field_6790"
+                filter=FilterMode.equal,
+                value=external_id
             )
+            print(
+                f"      📋 Filter object created: field='{external_id_field_id}', filter=FilterMode.equal, value={external_id}")
 
             # list_database_table_rows returns a Page object
+            print(f"      🌐 Calling list_database_table_rows with filter parameter...")
             result = self.client.list_database_table_rows(
                 table_id=table_id,
-                filter=[filter_obj]  # 'filter' not 'filters'
+                filter=[filter_obj]
             )
+            print(f"      ✅ API call succeeded, result type: {type(result)}")
 
             # Page object has .results attribute
             rows = result.results if hasattr(result, 'results') else result
-            return rows[0] if rows else None
+            print(f"      📊 Rows found: {len(rows) if rows else 0}")
+
+            if rows:
+                print(
+                    f"      ✅ Found existing row with ID: {rows[0].get('id', 'N/A')}, external_id: {rows[0].get('external_id', 'N/A')}")
+                return rows[0]
+            else:
+                print(
+                    f"      ℹ️ No existing row found with external_id={external_id}")
+                return None
+
         except Exception as e:
-            print(f"   Warning: Could not search for existing row: {e}")
+            print(
+                f"      ❌ ERROR in _find_row_by_external_id: {type(e).__name__}: {e}")
+            import traceback
+            print(f"      📍 Stack trace:")
+            traceback.print_exc()
             return None
+
+    def _parse_date_to_iso8601(self, date_str: str) -> str:
+        """
+        Parse various date formats and convert to ISO 8601 with timezone (YYYY-MM-DDThh:mm:ssZ)
+
+        Handles:
+        - "October 03, 2025 at 15:30" (natural language from LLM)
+        - "2025-10-03" (YYYY-MM-DD)
+        - "2025-10-03T15:30:00Z" (already ISO 8601)
+        - Empty string
+        """
+        print(f"      🔍 DATE PARSER INPUT: '{date_str}'")
+
+        if not date_str or date_str.strip() == "":
+            print(f"      ✅ DATE PARSER OUTPUT: '' (empty input)")
+            return ""
+
+        try:
+            # Try parsing as ISO 8601 first (already in correct format)
+            if "T" in date_str and ("Z" in date_str or "+" in date_str or date_str.count("-") > 2):
+                print(f"      ✅ DATE PARSER OUTPUT: '{date_str}' (already ISO 8601)")
+                return date_str
+
+            # Try parsing YYYY-MM-DD format
+            if len(date_str) == 10 and date_str.count("-") == 2:
+                result = f"{date_str}T00:00:00Z"
+                print(f"      ✅ DATE PARSER OUTPUT: '{result}' (from YYYY-MM-DD)")
+                return result
+
+            # Try parsing natural language format like "October 03, 2025 at 15:30"
+            # Common LLM output patterns
+            formats_to_try = [
+                "%B %d, %Y at %H:%M",  # October 03, 2025 at 15:30
+                "%B %d, %Y",           # October 03, 2025
+                "%Y-%m-%d %H:%M:%S",   # 2025-10-03 15:30:00
+                "%Y-%m-%d %H:%M",      # 2025-10-03 15:30
+                "%m/%d/%Y",            # 10/03/2025
+                "%d/%m/%Y",            # 03/10/2025
+            ]
+
+            for fmt in formats_to_try:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    result = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    print(f"      ✅ DATE PARSER OUTPUT: '{result}' (matched format: {fmt})")
+                    return result
+                except ValueError:
+                    continue
+
+            # If all parsing attempts fail, return empty string
+            print(f"      ⚠️ WARNING: Could not parse date '{date_str}', returning empty string")
+            return ""
+
+        except Exception as e:
+            print(f"      ❌ ERROR parsing date '{date_str}': {e}")
+            return ""
 
     async def _upsert_client(self, crm_data: Dict[str, Any], external_id: int) -> Dict[str, Any]:
         """Upsert client using procedural API"""
+        print(f"   👤 UPSERT CLIENT: external_id={external_id}")
+
         client_data = {
             "external_id": external_id,
             "client_name": crm_data.get("client_name", crm_data.get("customer_name", "Unknown")),
@@ -173,23 +273,36 @@ class BaserowManager:
         }
 
         # Transform field names to field IDs
-        client_data_with_ids = self._transform_to_field_ids(client_data, self.clients_field_map)
+        client_data_with_ids = self._transform_to_field_ids(
+            client_data, self.clients_field_map)
+        print(
+            f"      📝 Transformed {len(client_data_with_ids)} fields to field IDs")
 
-        existing_row = self._find_row_by_external_id(self.clients_table_id, external_id)
+        existing_row = self._find_row_by_external_id(
+            self.clients_table_id, external_id, self.clients_field_map)
 
         if existing_row:
             # Update existing row
-            return self.client.update_database_table_row(
+            print(
+                f"      🔄 UPDATE path: Updating existing row ID {existing_row['id']}")
+            result = self.client.update_database_table_row(
                 table_id=self.clients_table_id,
                 row_id=existing_row['id'],
                 record=client_data_with_ids
             )
+            print(f"      ✅ Update completed for row ID {existing_row['id']}")
+            return result
         else:
             # Create new row
-            return self.client.create_database_table_row(
+            print(
+                f"      ✨ CREATE path: Creating new row with external_id={external_id}")
+            result = self.client.create_database_table_row(
                 table_id=self.clients_table_id,
                 record=client_data_with_ids
             )
+            print(
+                f"      ✅ Create completed, new row ID: {result.get('id', 'N/A')}")
+            return result
 
     async def _upsert_meeting(self, crm_data: Dict[str, Any], external_id: int) -> Dict[str, Any]:
         """Upsert meeting using procedural API"""
@@ -204,19 +317,29 @@ class BaserowManager:
         }
         meeting_outcome = meeting_outcome_map.get(outcome, "Follow-up")
 
+        # Format meeting_date for Baserow (ISO 8601 with timezone)
+        meeting_date_raw = crm_data.get("meeting_date", "")
+        meeting_date_formatted = ""
+        if meeting_date_raw:
+            meeting_date_formatted = self._parse_date_to_iso8601(
+                meeting_date_raw)
+
         meeting_data = {
             "external_id": external_id,
             "client_external_id": external_id,
-            "meeting_date": crm_data.get("meeting_date", ""),
+            "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
+            "meeting_date": meeting_date_formatted,
             "transcript_filename": crm_data.get("transcript_filename", ""),
             "summary": crm_data.get("transcript_summary", ""),
             "meeting_outcome": meeting_outcome
         }
 
         # Transform field names to field IDs
-        meeting_data_with_ids = self._transform_to_field_ids(meeting_data, self.meetings_field_map)
+        meeting_data_with_ids = self._transform_to_field_ids(
+            meeting_data, self.meetings_field_map)
 
-        existing_row = self._find_row_by_external_id(self.meetings_table_id, external_id)
+        existing_row = self._find_row_by_external_id(
+            self.meetings_table_id, external_id, self.meetings_field_map)
 
         if existing_row:
             return self.client.update_database_table_row(
@@ -255,6 +378,7 @@ class BaserowManager:
             "external_id": external_id,
             "client_id": external_id,
             "meeting_id": external_id,
+            "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
             "products_discussed": products,
             "deal_amount": float(crm_data.get("deal", 0)),
             "deposit_amount": float(crm_data.get("deposit", 0)),
@@ -263,9 +387,11 @@ class BaserowManager:
         }
 
         # Transform field names to field IDs
-        deal_data_with_ids = self._transform_to_field_ids(deal_data, self.deals_field_map)
+        deal_data_with_ids = self._transform_to_field_ids(
+            deal_data, self.deals_field_map)
 
-        existing_row = self._find_row_by_external_id(self.deals_table_id, external_id)
+        existing_row = self._find_row_by_external_id(
+            self.deals_table_id, external_id, self.deals_field_map)
 
         if existing_row:
             return self.client.update_database_table_row(
@@ -285,12 +411,14 @@ class BaserowManager:
         if isinstance(social_content, str):
             social_text = social_content
         else:
-            social_text = social_content.get("social_media_quote", crm_data.get("social_media_quote", ""))
+            social_text = social_content.get(
+                "social_media_quote", crm_data.get("social_media_quote", ""))
 
         comm_data = {
             "external_id": external_id,
             "client_id": external_id,
             "meeting_id": external_id,
+            "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
             "follow_up_email_draft": crm_data.get("follow_up_email_draft", crm_data.get("email_draft", "")),
             "facebook_social_media_post": social_text,
             "instagram_social_media_post": social_text,
@@ -299,9 +427,11 @@ class BaserowManager:
         }
 
         # Transform field names to field IDs
-        comm_data_with_ids = self._transform_to_field_ids(comm_data, self.communications_field_map)
+        comm_data_with_ids = self._transform_to_field_ids(
+            comm_data, self.communications_field_map)
 
-        existing_row = self._find_row_by_external_id(self.communications_table_id, external_id)
+        existing_row = self._find_row_by_external_id(
+            self.communications_table_id, external_id, self.communications_field_map)
 
         if existing_row:
             return self.client.update_database_table_row(
@@ -323,14 +453,17 @@ class BaserowManager:
 
         coaching_data = {
             "external_id": external_id,
+            "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
             "objection_rebuttals": coaching_opportunities,
             "question_based_selling_opportunities": coaching_opportunities
         }
 
         # Transform field names to field IDs
-        coaching_data_with_ids = self._transform_to_field_ids(coaching_data, self.sales_coaching_field_map)
+        coaching_data_with_ids = self._transform_to_field_ids(
+            coaching_data, self.sales_coaching_field_map)
 
-        existing_row = self._find_row_by_external_id(self.sales_coaching_table_id, external_id)
+        existing_row = self._find_row_by_external_id(
+            self.sales_coaching_table_id, external_id, self.sales_coaching_field_map)
 
         if existing_row:
             return self.client.update_database_table_row(
