@@ -1,2 +1,0 @@
-external_id,client_external_id,meeting_date,duration_minutes,meeting_type,sales_rep,transcript_filename,summary
-12345678,12345678,2025-10-03,45,Discovery,Jane Smith,test_sprint01.txt,"Initial discovery call."

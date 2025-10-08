@@ -26,4 +26,4 @@ Files in this folder can be imported into Baserow to create starter tables.
 
 ## Notes
 - These templates are minimal. You can add more fields as your workflow matures.
-- If you later enable bidirectional sync, ensure webhook payloads include `external_id`.
+- If you later enable bidirectional sync, ensure webhook payloads include `external_id`. 

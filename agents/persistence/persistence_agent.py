@@ -6,14 +6,19 @@ from agents.base_agent import BaseAgent
 from config.settings import Settings
 from core.database.postgres import db_manager
 from core.database.models import Transcript
+from core.database.baserow import BaserowManager
 
 
 class PersistenceAgent(BaseAgent):
     """
     Handles the final persistence of all extracted and generated data into
-    the PostgreSQL database. It uses the transcript_id (stored as external_id)
-    to create or update the record, making the operation idempotent.
+    both PostgreSQL and Baserow databases. It uses the transcript_id (stored
+    as external_id) to create or update the record, making the operation idempotent.
     """
+
+    def __init__(self, settings: Settings):
+        super().__init__(settings)
+        self.baserow_manager = BaserowManager(settings)
 
     async def run(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -72,7 +77,22 @@ class PersistenceAgent(BaseAgent):
                 await session.execute(on_conflict_stmt)
                 await session.commit()
 
-            print(f"   ✅ Successfully saved final record for transcript ID {transcript_id}.")
+            print(f"   ✅ Successfully saved final record to PostgreSQL for transcript ID {transcript_id}.")
+
+            # Sync to Baserow (non-blocking - don't fail the whole pipeline if Baserow fails)
+            try:
+                crm_data = data.get("crm_data", {})
+                if crm_data:
+                    baserow_result = await self.baserow_manager.sync_crm_data(crm_data, transcript_id)
+                    if baserow_result.get("status") == "success":
+                        print(f"   ✅ Successfully synced to Baserow for transcript ID {transcript_id}.")
+                    else:
+                        print(f"   ⚠️ Baserow sync failed: {baserow_result.get('error')}")
+                else:
+                    print(f"   ⚠️ No CRM data to sync to Baserow.")
+            except Exception as baserow_error:
+                print(f"   ⚠️ Baserow sync failed (non-critical): {baserow_error}")
+
             return {"persistence_status": "success"}
 
         except Exception as e:

@@ -16,3 +16,4 @@ langgraph
 requests
 sentence-transformers
 python-multipart
+baserow-client

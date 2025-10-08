@@ -38,9 +38,20 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+  baserow:
+    image: baserow/baserow:latest
+    container_name: baserow
+    ports:
+      - "8080:80"
+    volumes:
+      - baserow_data:/baserow/data
+    environment:
+      - BASEROW_PUBLIC_URL=http://localhost:8080
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   qdrant_data:
   neo4j_data:
   ollama_data:
+  baserow_data:

@@ -6,7 +6,7 @@
 ### Architecture Decisions
 - Monorepo with modular agents
 - PostgreSQL + Qdrant + Neo4j
-- Local Mistral 7B via Ollama
+- Local via Ollama
 - Docker for services
 
 ### Completed Modules
