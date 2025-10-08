@@ -6,8 +6,10 @@ Uses baserow-client library with procedural API (not OOP table objects)
 """
 
 import json
+import requests
 from typing import Dict, Any, Optional, List
-from baserow.client import BaserowClient, Filter, FilterType
+from baserow.client import BaserowClient
+from baserow.filter import Filter, FilterMode, FilterType
 from config.settings import Settings
 
 
@@ -31,6 +33,16 @@ class BaserowManager:
         self.deals_table_id = settings.BASEROW_DEALS_ID
         self.communications_table_id = settings.BASEROW_COMMUNICATIONS_ID
         self.sales_coaching_table_id = settings.BASEROW_SALES_COACHING_ID
+
+        # Initialize field name → field ID mappings for all tables
+        # This is required because baserow-client needs field IDs (field_6790) not names (external_id)
+        print("📋 Initializing Baserow field mappings...")
+        self.clients_field_map = self._get_field_mapping(self.clients_table_id)
+        self.meetings_field_map = self._get_field_mapping(self.meetings_table_id)
+        self.deals_field_map = self._get_field_mapping(self.deals_table_id)
+        self.communications_field_map = self._get_field_mapping(self.communications_table_id)
+        self.sales_coaching_field_map = self._get_field_mapping(self.sales_coaching_table_id)
+        print(f"   ✅ Field mappings loaded for 5 tables")
 
     async def sync_crm_data(self, crm_data: Dict[str, Any], transcript_id: str) -> Dict[str, Any]:
         """
@@ -80,21 +92,68 @@ class BaserowManager:
             traceback.print_exc()
             return {"status": "failed", "error": str(e)}
 
+    def _get_field_mapping(self, table_id: int) -> Dict[str, str]:
+        """
+        Fetch field metadata from Baserow and create name → ID mapping.
+
+        Uses REST API because baserow-client.list_database_table_fields() has deserialization issues.
+
+        Returns:
+            Dict mapping field names to field IDs, e.g. {"external_id": "field_6790", ...}
+        """
+        try:
+            headers = {"Authorization": f"Token {self.settings.BASEROW_TOKEN}"}
+            response = requests.get(
+                f"{self.settings.BASEROW_URL}/api/database/fields/table/{table_id}/",
+                headers=headers
+            )
+            response.raise_for_status()
+            fields = response.json()
+
+            # Create mapping: field_name → field_id
+            return {field['name']: f"field_{field['id']}" for field in fields}
+        except Exception as e:
+            print(f"   ⚠️ Warning: Could not fetch field mapping for table {table_id}: {e}")
+            return {}
+
+    def _transform_to_field_ids(self, data: Dict[str, Any], field_map: Dict[str, str]) -> Dict[str, Any]:
+        """
+        Transform record data from field names to field IDs.
+
+        Args:
+            data: Record with field names as keys, e.g. {"external_id": 123, "client_name": "John"}
+            field_map: Mapping from field names to IDs, e.g. {"external_id": "field_6790", ...}
+
+        Returns:
+            Record with field IDs as keys, e.g. {"field_6790": 123, "field_6791": "John"}
+        """
+        transformed = {}
+        for field_name, value in data.items():
+            field_id = field_map.get(field_name)
+            if field_id:
+                transformed[field_id] = value
+            else:
+                print(f"   ⚠️ Warning: Field '{field_name}' not found in Baserow schema, skipping")
+        return transformed
+
     def _find_row_by_external_id(self, table_id: int, external_id: int) -> Optional[Dict[str, Any]]:
         """Find existing row by external_id using baserow-client API"""
         try:
             # Use Filter to search by external_id
             filter_obj = Filter(
                 field="external_id",
-                filter_type=FilterType.EQUAL,
-                value=str(external_id)
+                filter=FilterMode.equal,  # FilterMode.equal, not FilterType.EQUAL
+                value=external_id  # Can be int, no need to convert to string
             )
 
-            rows = self.client.list_database_table_rows(
+            # list_database_table_rows returns a Page object
+            result = self.client.list_database_table_rows(
                 table_id=table_id,
-                filters=[filter_obj]
+                filter=[filter_obj]  # 'filter' not 'filters'
             )
 
+            # Page object has .results attribute
+            rows = result.results if hasattr(result, 'results') else result
             return rows[0] if rows else None
         except Exception as e:
             print(f"   Warning: Could not search for existing row: {e}")
@@ -108,10 +167,13 @@ class BaserowManager:
             "email": crm_data.get("client_email", crm_data.get("email", "")),
             "marital_status": crm_data.get("marital_status", ""),
             "children_count": int(crm_data.get("children_count", 0)),
-            "estate_value": float(crm_data.get("estate_value", 0)),
+            "estate_value": int(crm_data.get("estate_value", 0)),
             "real_estate_count": int(crm_data.get("real_estate_count", 0)),
             "crm_json": json.dumps(crm_data, indent=2)
         }
+
+        # Transform field names to field IDs
+        client_data_with_ids = self._transform_to_field_ids(client_data, self.clients_field_map)
 
         existing_row = self._find_row_by_external_id(self.clients_table_id, external_id)
 
@@ -120,13 +182,13 @@ class BaserowManager:
             return self.client.update_database_table_row(
                 table_id=self.clients_table_id,
                 row_id=existing_row['id'],
-                data=client_data
+                record=client_data_with_ids
             )
         else:
             # Create new row
             return self.client.create_database_table_row(
                 table_id=self.clients_table_id,
-                data=client_data
+                record=client_data_with_ids
             )
 
     async def _upsert_meeting(self, crm_data: Dict[str, Any], external_id: int) -> Dict[str, Any]:
@@ -151,18 +213,21 @@ class BaserowManager:
             "meeting_outcome": meeting_outcome
         }
 
+        # Transform field names to field IDs
+        meeting_data_with_ids = self._transform_to_field_ids(meeting_data, self.meetings_field_map)
+
         existing_row = self._find_row_by_external_id(self.meetings_table_id, external_id)
 
         if existing_row:
             return self.client.update_database_table_row(
                 table_id=self.meetings_table_id,
                 row_id=existing_row['id'],
-                data=meeting_data
+                record=meeting_data_with_ids
             )
         else:
             return self.client.create_database_table_row(
                 table_id=self.meetings_table_id,
-                data=meeting_data
+                record=meeting_data_with_ids
             )
 
     async def _upsert_deal(self, crm_data: Dict[str, Any], external_id: int) -> Dict[str, Any]:
@@ -197,18 +262,21 @@ class BaserowManager:
             "objections": objections
         }
 
+        # Transform field names to field IDs
+        deal_data_with_ids = self._transform_to_field_ids(deal_data, self.deals_field_map)
+
         existing_row = self._find_row_by_external_id(self.deals_table_id, external_id)
 
         if existing_row:
             return self.client.update_database_table_row(
                 table_id=self.deals_table_id,
                 row_id=existing_row['id'],
-                data=deal_data
+                record=deal_data_with_ids
             )
         else:
             return self.client.create_database_table_row(
                 table_id=self.deals_table_id,
-                data=deal_data
+                record=deal_data_with_ids
             )
 
     async def _upsert_communication(self, crm_data: Dict[str, Any], external_id: int) -> Dict[str, Any]:
@@ -230,18 +298,21 @@ class BaserowManager:
             "client_quotes": crm_data.get("social_media_quote", "")
         }
 
+        # Transform field names to field IDs
+        comm_data_with_ids = self._transform_to_field_ids(comm_data, self.communications_field_map)
+
         existing_row = self._find_row_by_external_id(self.communications_table_id, external_id)
 
         if existing_row:
             return self.client.update_database_table_row(
                 table_id=self.communications_table_id,
                 row_id=existing_row['id'],
-                data=comm_data
+                record=comm_data_with_ids
             )
         else:
             return self.client.create_database_table_row(
                 table_id=self.communications_table_id,
-                data=comm_data
+                record=comm_data_with_ids
             )
 
     async def _upsert_sales_coaching(self, crm_data: Dict[str, Any], external_id: int) -> Dict[str, Any]:
@@ -256,18 +327,21 @@ class BaserowManager:
             "question_based_selling_opportunities": coaching_opportunities
         }
 
+        # Transform field names to field IDs
+        coaching_data_with_ids = self._transform_to_field_ids(coaching_data, self.sales_coaching_field_map)
+
         existing_row = self._find_row_by_external_id(self.sales_coaching_table_id, external_id)
 
         if existing_row:
             return self.client.update_database_table_row(
                 table_id=self.sales_coaching_table_id,
                 row_id=existing_row['id'],
-                data=coaching_data
+                record=coaching_data_with_ids
             )
         else:
             return self.client.create_database_table_row(
                 table_id=self.sales_coaching_table_id,
-                data=coaching_data
+                record=coaching_data_with_ids
             )
 
     # === Query Methods for CRM Tool Agent (use procedural API) ===
