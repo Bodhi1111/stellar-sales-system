@@ -55,10 +55,17 @@ class PersistenceAgent(BaseAgent):
             await db_manager.initialize()
             async with db_manager.session_context() as session:
 
+                # Handle chunks (can be list of strings OR list of dicts with 'text' key)
+                chunks = data.get("chunks", [])
+                if chunks and isinstance(chunks[0], dict):
+                    chunk_texts = [c.get('text', str(c)) for c in chunks]
+                else:
+                    chunk_texts = chunks
+
                 upsert_data = {
                     "external_id": transcript_id,
                     "filename": file_path.name,
-                    "full_text": "\n".join(data.get("chunks", [])),
+                    "full_text": "\n".join(chunk_texts) if chunk_texts else "",
                     "extracted_data": data.get("extracted_entities", {}),
                     "social_content": data.get("social_content", {}),
                     "email_draft": data.get("email_draft", ""),

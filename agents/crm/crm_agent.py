@@ -126,8 +126,8 @@ class CRMAgent(BaseAgent):
             "transcript_filename": file_path.name if file_path else "unknown.txt",
 
             # === CLIENT INFORMATION ===
-            "client_name": extracted_data.get("customer_name", enhanced_extraction.get("client_name", "")),
-            "client_email": extracted_data.get("email", enhanced_extraction.get("client_email", "")),
+            "client_name": extracted_data.get("client_name", extracted_data.get("customer_name", enhanced_extraction.get("client_name", ""))),
+            "client_email": extracted_data.get("client_email", extracted_data.get("email", enhanced_extraction.get("client_email", ""))),
 
             # === CLIENT PROFILE (Estate Planning Specific) ===
             "marital_status": enhanced_extraction.get("marital_status", ""),
@@ -479,8 +479,8 @@ class CRMAgent(BaseAgent):
             # Additional basic fields
             "transcript_id": str(uuid.uuid4())[:8],
             "meeting_date": datetime.now().strftime("%Y-%m-%d"),
-            "client_name": extracted_data.get("customer_name", ""),
-            "client_email": extracted_data.get("email", ""),
+            "client_name": extracted_data.get("client_name", extracted_data.get("customer_name", "")),
+            "client_email": extracted_data.get("client_email", extracted_data.get("email", "")),
             "product_discussed": "Estate Planning",
             "objections_raised": extracted_data.get("main_objection", ""),
             "transcript_summary": extracted_data.get("summary", ""),

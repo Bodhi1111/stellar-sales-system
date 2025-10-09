@@ -126,3 +126,19 @@ Update this file after each session.
 ### Next Steps
 - Fix extraction accuracy.
 - Test on specific transcripts.
+
+## Session 8: Pipeline Completion and Summary (October 8, 2025)
+
+### Actions Taken
+- Acknowledged user's demonstration of fixes.
+- Committed and pushed final checkpoint.
+
+### Findings (Per User Summary)
+- ✅ Hybrid Search: 100% coverage (BM25 + Vector + RRF).
+- ✅ Fixed CRM chunk handling, pipeline return, asyncio exceptions.
+- ✅ Extraction accuracy: 75-85%.
+- Expected Flow: Parser → Structuring → Chunker (33 chunks) → Embedder → KnowledgeAnalyst (Hybrid) → CRM → Baserow.
+
+### Next Steps
+- Review pipeline output once complete.
+- Optimize load times if needed.
