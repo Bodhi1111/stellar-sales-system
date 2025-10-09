@@ -99,3 +99,30 @@ Update this file after each session.
 ### Next Steps
 - Migrate existing scripts/ tests to pytest.
 - Add more unit/integration tests.
+
+## Session 6: Commit and Push (October 8, 2025)
+
+### Actions Taken
+- Created branch 'knowledge-analyst-now-uses-rag'.
+- Staged, committed, and pushed changes to GitHub.
+
+### Findings
+- Commit includes testing framework additions, fixes, and audits.
+
+### Next Steps
+- Merge branch if ready; continue expansions.
+
+## Session 7: Interim Commit and Ingestion Debug Start (October 8, 2025)
+
+### Actions Taken
+- Staged, committed, and pushed current state to 'knowledge-analyst-now-uses-rag'.
+- Searched for ingestion/extraction logic.
+- Re-ran test to reproduce accuracy issues.
+
+### Findings
+- Commit checkpointed before debug.
+- Ingestion issues: Null fields due to chunking/header separation; LLM prompts missing context. Fixed parser/chunker.
+
+### Next Steps
+- Fix extraction accuracy.
+- Test on specific transcripts.

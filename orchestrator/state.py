@@ -30,6 +30,11 @@ class AgentState(TypedDict):
     db_save_status: Optional[Dict[str, Any]]  # RE-ADDED for compatibility
     historian_status: Optional[Dict[str, Any]]  # RE-ADDED for compatibility
 
+    # --- Semantic NLP Fields (Intelligence First Enhancement) ---
+    semantic_turns: Optional[List[Dict[str, Any]]]  # Per-turn intent/sentiment/discourse
+    key_entities_nlp: Optional[Dict[str, Any]]  # Entities extracted by StructuringAgent NLP
+    conversation_structure: Optional[Dict[str, Any]]  # Overall structure metrics
+
     # --- Reasoning Engine & "Intelligence First" Fields ---
     # User's original query for reasoning engine
     original_request: Optional[str]

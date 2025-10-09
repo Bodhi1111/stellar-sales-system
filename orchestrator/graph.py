@@ -64,24 +64,64 @@ tool_map = {
 # --- Define Agent Nodes for the Intelligence First Workflow ---
 
 
+async def structuring_node(state: AgentState) -> Dict[str, Any]:
+    """
+    NEW ARCHITECTURE: Runs FIRST on raw transcript
+    Performs SEMANTIC NLP ANALYSIS using spaCy + transformers
+    Extracts: phases, entities, topics, intent, sentiment, discourse markers
+    """
+    # Read raw transcript
+    content = state["file_path"].read_text(encoding='utf-8')
+
+    # Enable semantic NLP analysis (use_semantic_nlp=True)
+    result = await structuring_agent.run(
+        raw_transcript=content,
+        use_semantic_nlp=True  # ← ENABLES NLP PROCESSOR
+    )
+
+    # Extract components from NLP analysis
+    if isinstance(result, dict) and "conversation_phases" in result:
+        # Full semantic NLP result
+        return {
+            "conversation_phases": result.get("conversation_phases", []),
+            "semantic_turns": result.get("semantic_turns", []),
+            "key_entities_nlp": result.get("named_entities", {}),
+            "conversation_structure": result.get("document_metadata", {})
+        }
+    else:
+        # Backward compatible (list of phases only)
+        return {"conversation_phases": result}
+
+
 async def parser_node(state: AgentState) -> Dict[str, Any]:
-    """Parse raw transcript and extract transcript_id from header"""
-    result = await parser_agent.run(file_path=state["file_path"])
+    """
+    Parse transcript and ENRICH with conversation phase + semantic NLP metadata
+    Receives phases + semantic_turns from StructuringAgent NLP analysis
+    """
+    result = await parser_agent.run(
+        file_path=state["file_path"],
+        conversation_phases=state.get("conversation_phases"),
+        semantic_turns=state.get("semantic_turns")  # ← NLP semantic metadata
+    )
     return {
         "structured_dialogue": result["structured_dialogue"],
-        "transcript_id": result["transcript_id"]
+        "transcript_id": result["transcript_id"],
+        "conversation_phases": result.get("conversation_phases"),  # Passthrough
+        "semantic_turns": state.get("semantic_turns"),  # Passthrough NLP metadata
+        "key_entities_nlp": state.get("key_entities_nlp"),  # Passthrough
+        "conversation_structure": state.get("conversation_structure")  # Passthrough
     }
 
 
-async def structuring_node(state: AgentState) -> Dict[str, Any]:
-    """Analyze conversation phases and structure"""
-    conversation_phases = await structuring_agent.run(structured_dialogue=state["structured_dialogue"])
-    return {"conversation_phases": conversation_phases}
-
-
 async def chunker_node(state: AgentState) -> Dict[str, Any]:
-    """Segment content for optimal processing"""
-    chunks = await chunker_agent.run(file_path=state["file_path"])
+    """
+    Segment content with RICH metadata preservation
+    Receives enriched dialogue from ParserAgent
+    """
+    chunks = await chunker_agent.run(
+        file_path=state["file_path"],
+        structured_dialogue=state.get("structured_dialogue")
+    )
     return {"chunks": chunks}
 
 
@@ -106,9 +146,11 @@ async def embedder_node(state: AgentState) -> Dict[str, Any]:
         return {}
 
     # Prepare metadata for embeddings (enables filtering in RAG queries)
+    # Note: extracted_data is not available yet (embedder runs BEFORE knowledge analyst)
+    # We only have conversation_phases from structuring agent at this point
     metadata = {
-        "client_name": state.get("extracted_data", {}).get("client_name", ""),
-        "meeting_date": state.get("extracted_data", {}).get("meeting_date", ""),
+        "client_name": "",  # Will be empty at this stage, populated later
+        "meeting_date": "",  # Will be empty at this stage, populated later
         "conversation_phases": state.get("conversation_phases", [])
     }
 
@@ -130,13 +172,19 @@ async def email_node(state: AgentState) -> Dict[str, Any]:
 
 async def social_node(state: AgentState) -> Dict[str, Any]:
     """Generate social media content"""
-    social_content = await social_agent.run(chunks=state["chunks"])
+    # Extract text from chunk dicts for backward compatibility
+    chunks = state["chunks"]
+    chunk_texts = [c["text"] if isinstance(c, dict) else c for c in chunks]
+    social_content = await social_agent.run(chunks=chunk_texts)
     return {"social_content": social_content}
 
 
 async def sales_coach_node(state: AgentState) -> Dict[str, Any]:
     """Provide coaching feedback"""
-    coaching_feedback = await sales_coach_agent.run(chunks=state["chunks"])
+    # Extract text from chunk dicts for backward compatibility
+    chunks = state["chunks"]
+    chunk_texts = [c["text"] if isinstance(c, dict) else c for c in chunks]
+    coaching_feedback = await sales_coach_agent.run(chunks=chunk_texts)
     return {"coaching_feedback": coaching_feedback}
 
 
@@ -192,10 +240,11 @@ def create_master_workflow():
     workflow.add_node("crm", crm_node)
     workflow.add_node("persistence", persistence_node)
 
-    # --- Define the Graph Edges (NEW: Embedder-First Architecture) ---
-    workflow.set_entry_point("parser")
-    workflow.add_edge("parser", "structuring")
-    workflow.add_edge("structuring", "chunker")
+    # --- Define the Graph Edges (NEW ARCHITECTURE: Structuring-First) ---
+    # CRITICAL: Structuring runs FIRST on raw transcript for semantic NLP analysis
+    workflow.set_entry_point("structuring")
+    workflow.add_edge("structuring", "parser")  # Parser enriches dialogue with phases
+    workflow.add_edge("parser", "chunker")
 
     # NEW FLOW: Embedder runs FIRST to populate Qdrant (fast)
     # Then Knowledge Analyst queries the vectors (RAG-based extraction)

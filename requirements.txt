@@ -17,3 +17,12 @@ requests
 sentence-transformers
 python-multipart
 baserow-client
+
+# NLP Libraries for Semantic Analysis
+spacy>=3.7.0
+transformers>=4.35.0
+torch>=2.0.0
+nltk>=3.8.0
+
+# Hybrid Search & Reranking
+rank-bm25>=0.2.2

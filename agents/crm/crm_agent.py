@@ -175,8 +175,14 @@ class CRMAgent(BaseAgent):
     async def _extract_missing_fields(self, extracted_data: Dict[str, Any], chunks: List[str]) -> Dict[str, Any]:
         """Use LLM to extract estate planning specific fields from FULL TRANSCRIPT"""
 
+        # Handle chunks (can be list of strings OR list of dicts with 'text' key)
+        if chunks and isinstance(chunks[0], dict):
+            chunk_texts = [c.get('text', str(c)) for c in chunks]
+        else:
+            chunk_texts = chunks if chunks else []
+
         # Combine chunks into full transcript for comprehensive analysis
-        full_transcript = "\n\n".join(chunks) if chunks else ""
+        full_transcript = "\n\n".join(chunk_texts) if chunk_texts else ""
 
         # Create a focused prompt for estate planning data extraction
         prompt = f"""
