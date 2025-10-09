@@ -4,6 +4,7 @@ import json
 from typing import List, Dict, Any
 from pathlib import Path
 from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 from agents.base_agent import BaseAgent
 from config.settings import Settings
@@ -39,6 +40,61 @@ class KnowledgeAnalystAgent(BaseAgent):
             b=0.75,  # BM25 length normalization
             rrf_k=60  # RRF constant
         )
+
+    async def _extract_header_only(self, transcript_id: str) -> Dict[str, Any]:
+        """
+        Fast fallback: Extract only from header chunk (no LLM, just parsing).
+        Used when CRM data not available yet.
+        """
+        try:
+            # Get header chunk (index 0)
+            results = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(key="transcript_id", match=MatchValue(value=transcript_id)),
+                        FieldCondition(key="chunk_index", match=MatchValue(value=0))
+                    ]
+                ),
+                limit=1,
+                with_payload=True
+            )
+
+            if not results[0]:
+                return self._empty_entities()
+
+            header_text = results[0][0].payload.get("text", "")
+            lines = [line.strip() for line in header_text.split('\n') if line.strip()]
+
+            # Parse header structure (same as parser)
+            return {
+                "client_name": lines[1] if len(lines) > 1 else "",
+                "client_email": lines[2] if len(lines) > 2 else "",
+                "meeting_date": lines[3] if len(lines) > 3 else "",
+                "transcript_id": lines[4] if len(lines) > 4 else transcript_id,
+                "marital_status": None,
+                "children_count": 0,
+                "meeting_outcome": None,
+                "objections_raised": [],
+                "products_discussed": ["Estate Planning"]
+            }
+        except Exception as e:
+            print(f"   ⚠️ Header extraction failed: {e}")
+            return self._empty_entities()
+
+    def _empty_entities(self) -> Dict[str, Any]:
+        """Return empty entity structure"""
+        return {
+            "client_name": "",
+            "client_email": "",
+            "meeting_date": "",
+            "transcript_id": "",
+            "marital_status": None,
+            "children_count": 0,
+            "meeting_outcome": None,
+            "objections_raised": [],
+            "products_discussed": []
+        }
 
     def _get_required_fields_prompt(self) -> str:
         """
@@ -205,15 +261,6 @@ JSON SCHEMA:
   "real_estate_count": number or null,
   "real_estate_locations": ["array", "of", "strings"],
   "llc_interest": "string or null",
-  "deal": number or null,
-  "deposit": number or null,
-  "products_discussed": ["array", "of", "strings"],
-  "objections_raised": ["array", "of", "strings"],
-  "meeting_outcome": "string or null",
-  "next_steps": ["array", "of", "strings"]
-}}
-  "real_estate_locations": ["array", "of", "strings"],
-  "llc_interest": "number or null",
   "deal": number or null,
   "deposit": number or null,
   "products_discussed": ["array", "of", "strings"],
@@ -469,29 +516,50 @@ OUTPUT (valid JSON only):
                 print(f"      ❌ Fallback also failed: {fallback_error}")
                 return []
 
-    async def run(self, transcript_id: str, file_path: Path) -> Dict[str, Any]:
+    async def run(self, transcript_id: str, file_path: Path, chunks: List[Dict] = None, header_metadata: Dict = None, crm_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        HYBRID SEARCH RAG: Query Qdrant with BM25 + Vector + RRF fusion, then extract entities.
-        This improves retrieval accuracy from 50% to 75-85%.
+        OPTIMIZED: Build Neo4j knowledge graph using CRM data (no extraction bottleneck).
+
+        Previous architecture extracted entities here (44s bottleneck!).
+        New architecture: CRM Agent does comprehensive extraction, we just build graph.
         """
-        print(f"📊 KnowledgeAnalystAgent: Analyzing transcript for {file_path.name}...")
+        print(f"📊 KnowledgeAnalystAgent: Building knowledge graph for {file_path.name}...")
 
-        # Retrieve chunks using HYBRID SEARCH (BM25 + Vector + RRF fusion)
-        chunks = await self._retrieve_with_hybrid_search(transcript_id, top_k=15)
+        # Use CRM data if available (passed from workflow after CRM runs)
+        # Otherwise create minimal extracted_entities for backward compatibility
+        if crm_data:
+            print("   ✅ Using CRM data for knowledge graph")
+            extracted_entities = {
+                "client_name": crm_data.get("client_name"),
+                "client_email": crm_data.get("client_email"),
+                "marital_status": crm_data.get("marital_status"),
+                "children_count": crm_data.get("children_count", 0),
+                "meeting_outcome": crm_data.get("outcome"),
+                "objections_raised": crm_data.get("objections_raised", "").split("; ") if crm_data.get("objections_raised") else [],
+                "products_discussed": [crm_data.get("product_discussed", "Estate Planning")],
+            }
+        else:
+            # NEW: Override with header metadata if available
+            if header_metadata:
+                print("   ✅ Using header metadata for knowledge graph")
+                extracted_entities = {
+                    'meeting_title': header_metadata.get('meeting_title') or "",
+                    'client_name': header_metadata.get('client_name') or "",
+                    'client_email': header_metadata.get('client_email') or "",
+                    'meeting_date': header_metadata.get('meeting_date') or "",
+                    'transcript_id': header_metadata.get('transcript_id') or transcript_id,
+                    'marital_status': None,
+                    'children_count': 0,
+                    'meeting_outcome': None,
+                    'objections_raised': [],
+                    'products_discussed': ["Estate Planning"]
+                }
+            else:
+                # Fallback: extract minimal data from header (very fast - no LLM calls!)
+                print("   ⚠️ No header metadata available, extracting header only (fast)")
+                extracted_entities = await self._extract_header_only(transcript_id)
 
-        if not chunks:
-            print("   - No chunks found in Qdrant, skipping analysis.")
-            return {"knowledge_graph_status": "skipped", "extracted_entities": {}}
-
-        # Now do a single-pass extraction (no map phase, just reduce)
-        extracted_facts = await self._map_chunks_to_facts(chunks)
-        if not extracted_facts:
-            print("   - No facts extracted, skipping analysis.")
-            return {"knowledge_graph_status": "skipped", "extracted_entities": {}}
-
-        extracted_entities = await self._reduce_facts_to_json(extracted_facts)
-        print(
-            f"   -> Final extracted entities: {json.dumps(extracted_entities, indent=2)}")
+        print(f"   -> Entities for graph: {json.dumps(extracted_entities, indent=2)}")
 
         try:
             client_name = extracted_entities.get("client_name")

@@ -265,12 +265,16 @@ class BaserowManager:
             "external_id": external_id,
             "client_name": crm_data.get("client_name", crm_data.get("customer_name", "Unknown")),
             "email": crm_data.get("client_email", crm_data.get("email", "")),
-            "marital_status": crm_data.get("marital_status", ""),
             "children_count": int(crm_data.get("children_count", 0)),
             "estate_value": int(crm_data.get("estate_value", 0)),
             "real_estate_count": int(crm_data.get("real_estate_count", 0)),
             "crm_json": json.dumps(crm_data, indent=2)
         }
+
+        # Only include marital_status if it has a valid value (Baserow select fields reject empty strings)
+        marital_status = crm_data.get("marital_status", "")
+        if marital_status and marital_status.strip():
+            client_data["marital_status"] = marital_status
 
         # Transform field names to field IDs
         client_data_with_ids = self._transform_to_field_ids(
@@ -328,11 +332,15 @@ class BaserowManager:
             "external_id": external_id,
             "client_external_id": external_id,
             "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
-            "meeting_date": meeting_date_formatted,
             "transcript_filename": crm_data.get("transcript_filename", ""),
             "summary": crm_data.get("transcript_summary", ""),
             "meeting_outcome": meeting_outcome
         }
+
+        # Only include meeting_date if we have a valid ISO 8601 datetime
+        # Baserow datetime fields reject empty strings
+        if meeting_date_formatted and meeting_date_formatted.strip():
+            meeting_data["meeting_date"] = meeting_date_formatted
 
         # Transform field names to field IDs
         meeting_data_with_ids = self._transform_to_field_ids(

@@ -15,6 +15,9 @@ class AgentState(TypedDict):
     file_path: Optional[Path]
     transcript_id: Optional[str]  # Changed from int to str to match header ID
     chunks: Optional[List[str]]
+    
+    # --- Header Metadata (NEW) ---
+    header_metadata: Optional[Dict[str, Any]]  # Contains client_name, email, date, etc.
 
     # --- Ingestion & Legacy Fields (from Sprint 1) ---
     raw_text: Optional[str]

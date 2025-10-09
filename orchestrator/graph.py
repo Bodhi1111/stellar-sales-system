@@ -109,7 +109,8 @@ async def parser_node(state: AgentState) -> Dict[str, Any]:
         "conversation_phases": result.get("conversation_phases"),  # Passthrough
         "semantic_turns": state.get("semantic_turns"),  # Passthrough NLP metadata
         "key_entities_nlp": state.get("key_entities_nlp"),  # Passthrough
-        "conversation_structure": state.get("conversation_structure")  # Passthrough
+        "conversation_structure": state.get("conversation_structure"),  # Passthrough
+        "header_metadata": result.get("header_metadata")  # NEW: Complete header metadata
     }
 
 
@@ -129,7 +130,9 @@ async def knowledge_analyst_node(state: AgentState) -> Dict[str, Any]:
     """Extract entities from Qdrant vectors and build knowledge graph (RAG-based)"""
     result = await knowledge_analyst_agent.run(
         transcript_id=state["transcript_id"],
-        file_path=state["file_path"]
+        file_path=state["file_path"],
+        chunks=state.get("chunks"),
+        header_metadata=state.get("header_metadata")  # NEW: Pass header metadata
     )
     # Populate both new and legacy fields for compatibility
     return {
@@ -166,7 +169,8 @@ async def embedder_node(state: AgentState) -> Dict[str, Any]:
 
 async def email_node(state: AgentState) -> Dict[str, Any]:
     """Generate follow-up email drafts"""
-    email_draft = await email_agent.run(extracted_data=state["extracted_data"])
+    # Use empty dict if extracted_data not available (KnowledgeAnalyst removed)
+    email_draft = await email_agent.run(extracted_data=state.get("extracted_data", {}))
     return {"email_draft": email_draft}
 
 
@@ -190,8 +194,9 @@ async def sales_coach_node(state: AgentState) -> Dict[str, Any]:
 
 async def crm_node(state: AgentState) -> Dict[str, Any]:
     """Aggregate all insights for CRM"""
+    # Use empty dict if extracted_data not available (KnowledgeAnalyst removed)
     crm_data = await crm_agent.run(
-        extracted_data=state["extracted_data"],
+        extracted_data=state.get("extracted_data", {}),
         chunks=state["chunks"],
         email_draft=state.get("email_draft"),
         social_opportunities=state.get("social_content"),
@@ -232,7 +237,7 @@ def create_master_workflow():
     workflow.add_node("parser", parser_node)
     workflow.add_node("structuring", structuring_node)
     workflow.add_node("chunker", chunker_node)
-    workflow.add_node("knowledge_analyst", knowledge_analyst_node)
+    # REMOVED: knowledge_analyst node (bottleneck causing 44s slowdown)
     workflow.add_node("embedder", embedder_node)
     workflow.add_node("email", email_node)
     workflow.add_node("social", social_node)
@@ -240,23 +245,22 @@ def create_master_workflow():
     workflow.add_node("crm", crm_node)
     workflow.add_node("persistence", persistence_node)
 
-    # --- Define the Graph Edges (NEW ARCHITECTURE: Structuring-First) ---
+    # --- Define the Graph Edges (OPTIMIZED: No KnowledgeAnalyst) ---
     # CRITICAL: Structuring runs FIRST on raw transcript for semantic NLP analysis
     workflow.set_entry_point("structuring")
     workflow.add_edge("structuring", "parser")  # Parser enriches dialogue with phases
     workflow.add_edge("parser", "chunker")
 
-    # NEW FLOW: Embedder runs FIRST to populate Qdrant (fast)
-    # Then Knowledge Analyst queries the vectors (RAG-based extraction)
+    # OPTIMIZED FLOW: Embedder populates Qdrant, then fan out to downstream agents
+    # No KnowledgeAnalyst bottleneck (removed 44s of LLM extraction)
     workflow.add_edge("chunker", "embedder")
-    workflow.add_edge("embedder", "knowledge_analyst")
 
-    # After the knowledge analyst runs, fan out to the legacy downstream agents
-    workflow.add_edge("knowledge_analyst", "email")
-    workflow.add_edge("knowledge_analyst", "social")
-    workflow.add_edge("knowledge_analyst", "sales_coach")
+    # After embedder, fan out to downstream agents in parallel
+    workflow.add_edge("embedder", "email")
+    workflow.add_edge("embedder", "social")
+    workflow.add_edge("embedder", "sales_coach")
 
-    # Converge legacy agents into the CRM agent
+    # Converge downstream agents into the CRM agent
     workflow.add_edge(["email", "social", "sales_coach"], "crm")
 
     # Final persistence (no longer needs to wait for embedder separately)

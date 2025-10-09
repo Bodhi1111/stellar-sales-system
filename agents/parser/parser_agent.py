@@ -85,43 +85,92 @@ class ParserAgent(BaseAgent):
 
         return current_phase
 
+    def _extract_header_metadata(self, raw_text: str) -> Dict[str, Any]:
+        """
+        Extract all metadata from header section (first 14 lines).
+        Based on annotated format with alternating line pattern (odd lines have data, even lines blank):
+        Line 1 (index 0): meeting_title (CRITICAL - human-readable identifier)
+        Line 3 (index 2): client_name
+        Line 5 (index 4): client_email
+        Line 7 (index 6): meeting_date AND meeting_time (combined in ISO format)
+        Line 9 (index 8): transcript_id
+        Line 11 (index 10): meeting_url
+        Line 13 (index 12): duration_minutes
+        """
+        lines = raw_text.split('\n')[:14]  # First 14 lines (0-13 indexed)
+        
+        # Logical sequence matching CRM fields (starting with meeting title)
+        metadata = {
+            'meeting_title': None,      # Line 1 (index 0) - MOST IMPORTANT
+            'client_name': None,        # Line 3 (index 2)
+            'client_email': None,       # Line 5 (index 4)
+            'meeting_date': None,       # Line 7 (index 6)
+            'meeting_time': None,       # Line 7 (index 6)
+            'transcript_id': None,      # Line 9 (index 8)
+            'meeting_url': None,        # Line 11 (index 10)
+            'duration_minutes': None    # Line 13 (index 12)
+        }
+        
+        # Line 1 (index 0) = meeting title / file name (CRITICAL - human-readable identifier)
+        if len(lines) > 0:
+            metadata['meeting_title'] = lines[0].strip()
+        
+        # Line 3 (index 2) = actual client name
+        if len(lines) > 2:
+            metadata['client_name'] = lines[2].strip()
+        
+        # Line 5 (index 4) = email
+        if len(lines) > 4 and '@' in lines[4]:
+            metadata['client_email'] = lines[4].strip()
+        
+        # Line 7 (index 6) = date AND time combined (ISO format: YYYY-MM-DDTHH:MM:SS)
+        if len(lines) > 6:
+            # Extract date
+            date_match = re.search(r'(\d{4}-\d{2}-\d{2})', lines[6])
+            if date_match:
+                metadata['meeting_date'] = date_match.group(1)
+            
+            # Extract time from same line
+            time_match = re.search(r'T(\d{2}:\d{2}:\d{2})', lines[6])
+            if time_match:
+                metadata['meeting_time'] = time_match.group(1)
+        
+        # Line 9 (index 8) = transcript_id (numeric value, may have decimals)
+        if len(lines) > 8:
+            id_match = re.search(r'(\d+\.?\d*)', lines[8])
+            if id_match:
+                metadata['transcript_id'] = id_match.group(1)
+        
+        # Line 11 (index 10) = meeting URL
+        if len(lines) > 10 and 'http' in lines[10]:
+            metadata['meeting_url'] = lines[10].strip()
+        
+        # Line 13 (index 12) = duration (decimal minutes)
+        if len(lines) > 12:
+            duration_match = re.search(r'(\d+\.?\d*)', lines[12])
+            if duration_match:
+                metadata['duration_minutes'] = float(duration_match.group(1))
+        
+        return metadata
+
     def _extract_transcript_id(self, content: str) -> str:
         """
         Extracts the transcript_id from the file header.
-
-        Line 1:  Meeting Title
-        Line 2:  (blank)
-        Line 3:  Client Name
-        Line 4:  (blank)
-        Line 5:  Email
-        Line 6:  (blank)
-        Line 7:  Date (ISO 8601)
-        Line 8:  (blank)
-        Line 9:  Transcript ID
-        Line 10: (blank)
-        Line 11: URL
-        Line 12: (blank)
-        Line 13: Duration (decimal minutes)
-        Line 14: (blank)
-        Line 15: First dialogue turn
+        Now uses the enhanced header metadata extraction.
 
         Returns:
             The transcript_id as a string, or a generated ID if not found
         """
-        lines = content.split('\n')
-
-        # Look for a purely numeric line in the header (first 10 lines)
-        for i, line in enumerate(lines[:10]):
-            line = line.strip()
-            # Look for a line that's purely numeric and reasonably long (6+ digits)
-            if line.isdigit() and len(line) >= 6:
-                print(f"   Found transcript_id in header: {line}")
-                return line
+        metadata = self._extract_header_metadata(content)
+        
+        if metadata['transcript_id']:
+            print(f"   Found transcript_id in header: {metadata['transcript_id']}")
+            return metadata['transcript_id']
 
         # Fallback: generate from filename if not found
         print("   ⚠️ Warning: Could not find transcript_id in header, generating from filename")
         import hashlib
-        fallback_id = hashlib.md5(lines[0].encode()).hexdigest()[:12]
+        fallback_id = hashlib.md5(metadata.get('client_name', 'unknown').encode()).hexdigest()[:12]
         return fallback_id
 
     async def run(self, file_path: Path, conversation_phases: list = None, semantic_turns: list = None) -> Dict[str, Any]:
@@ -146,6 +195,7 @@ class ParserAgent(BaseAgent):
             - structured_dialogue: List of parsed dialogue turns (enriched with phase + semantic metadata)
             - transcript_id: The extracted or generated transcript ID
             - conversation_phases: Passthrough for downstream agents
+            - header_metadata: Complete header metadata (NEW)
         """
         print(f"📜 ParserAgent: Parsing transcript {file_path.name}...")
         if conversation_phases:
@@ -158,7 +208,11 @@ class ParserAgent(BaseAgent):
         try:
             content = file_path.read_text(encoding='utf-8')
 
-            # Extract transcript_id from header
+            # NEW: Extract complete header metadata first
+            header_metadata = self._extract_header_metadata(content)
+            print(f"   📋 Extracted header metadata: {header_metadata}")
+
+            # Extract transcript_id from header (now uses enhanced extraction)
             transcript_id = self._extract_transcript_id(content)
 
             lines = content.strip().split('\n')
@@ -232,7 +286,8 @@ class ParserAgent(BaseAgent):
             return {
                 "structured_dialogue": structured_dialogue,
                 "transcript_id": transcript_id,
-                "conversation_phases": conversation_phases  # Pass through for downstream agents
+                "conversation_phases": conversation_phases,  # Pass through for downstream agents
+                "header_metadata": header_metadata  # NEW: Complete header metadata
             }
 
         except Exception as e:
@@ -240,5 +295,7 @@ class ParserAgent(BaseAgent):
                 f"   ❌ ERROR: An unexpected error occurred during parsing: {e}")
             return {
                 "structured_dialogue": [],
-                "transcript_id": None
+                "transcript_id": None,
+                "conversation_phases": None,
+                "header_metadata": {}
             }

@@ -115,7 +115,7 @@ class CRMAgent(BaseAgent):
         # Build comprehensive CRM record
         crm_record = {
             # === BACKWARD COMPATIBILITY FIELDS (original fields) ===
-            "customer_name": extracted_data.get("customer_name", ""),
+            "client_name_legacy": extracted_data.get("client_name", ""),
             "main_objection": extracted_data.get("main_objection", ""),
             "next_steps": extracted_data.get("next_steps", ""),
 
@@ -126,8 +126,8 @@ class CRMAgent(BaseAgent):
             "transcript_filename": file_path.name if file_path else "unknown.txt",
 
             # === CLIENT INFORMATION ===
-            "client_name": extracted_data.get("client_name", extracted_data.get("customer_name", enhanced_extraction.get("client_name", ""))),
-            "client_email": extracted_data.get("client_email", extracted_data.get("email", enhanced_extraction.get("client_email", ""))),
+            "client_name": extracted_data.get("client_name") or enhanced_extraction.get("client_name", ""),
+            "client_email": extracted_data.get("client_email") or enhanced_extraction.get("client_email", ""),
 
             # === CLIENT PROFILE (Estate Planning Specific) ===
             "marital_status": enhanced_extraction.get("marital_status", ""),
@@ -197,6 +197,7 @@ class CRMAgent(BaseAgent):
         Extract the following estate planning fields (use "not_found" if information not available):
 
         1. Client personal details:
+           - client_name (full name of the client/prospect)
            - marital_status (Single/Married/Divorced/Widowed/Separated)
            - children_count (number)
            - client_email (email address)
@@ -216,6 +217,7 @@ class CRMAgent(BaseAgent):
 
         Respond ONLY in JSON format:
         {{
+            "client_name": "John Doe",
             "marital_status": "Married",
             "children_count": 2,
             "client_email": "client@example.com",
@@ -469,7 +471,7 @@ class CRMAgent(BaseAgent):
         # Create basic record that maintains backward compatibility
         basic_record = {
             # Original fields for compatibility
-            "customer_name": extracted_data.get("customer_name", ""),
+            "client_name_legacy": extracted_data.get("client_name", ""),
             "main_objection": extracted_data.get("main_objection", ""),
             "next_steps": extracted_data.get("next_steps", ""),
             "email_draft": email_draft,
@@ -479,8 +481,8 @@ class CRMAgent(BaseAgent):
             # Additional basic fields
             "transcript_id": str(uuid.uuid4())[:8],
             "meeting_date": datetime.now().strftime("%Y-%m-%d"),
-            "client_name": extracted_data.get("client_name", extracted_data.get("customer_name", "")),
-            "client_email": extracted_data.get("client_email", extracted_data.get("email", "")),
+            "client_name": extracted_data.get("client_name", ""),
+            "client_email": extracted_data.get("client_email", ""),
             "product_discussed": "Estate Planning",
             "objections_raised": extracted_data.get("main_objection", ""),
             "transcript_summary": extracted_data.get("summary", ""),
