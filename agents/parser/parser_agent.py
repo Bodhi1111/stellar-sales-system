@@ -88,68 +88,104 @@ class ParserAgent(BaseAgent):
     def _extract_header_metadata(self, raw_text: str) -> Dict[str, Any]:
         """
         Extract all metadata from header section (first 14 lines).
-        Based on annotated format with alternating line pattern (odd lines have data, even lines blank):
-        Line 1 (index 0): meeting_title (CRITICAL - human-readable identifier)
-        Line 3 (index 2): client_name
-        Line 5 (index 4): client_email
-        Line 7 (index 6): meeting_date AND meeting_time (combined in ISO format)
-        Line 9 (index 8): transcript_id
-        Line 11 (index 10): meeting_url
-        Line 13 (index 12): duration_minutes
+        Handles TWO patterns:
+        
+        PATTERN A (George Padron): Line 1=title, Line 2=name, Line 4=email, Line 6=date, Line 8=id, Line 10=url, Line 12=duration
+        PATTERN B (Robin Michalek): Line 1=title, Line 3=name, Line 5=email, Line 7=date, Line 9=id, Line 11=url, Line 13=duration
         """
         lines = raw_text.split('\n')[:14]  # First 14 lines (0-13 indexed)
         
-        # Logical sequence matching CRM fields (starting with meeting title)
         metadata = {
-            'meeting_title': None,      # Line 1 (index 0) - MOST IMPORTANT
-            'client_name': None,        # Line 3 (index 2)
-            'client_email': None,       # Line 5 (index 4)
-            'meeting_date': None,       # Line 7 (index 6)
-            'meeting_time': None,       # Line 7 (index 6)
-            'transcript_id': None,      # Line 9 (index 8)
-            'meeting_url': None,        # Line 11 (index 10)
-            'duration_minutes': None    # Line 13 (index 12)
+            'meeting_title': None,
+            'client_name': None,
+            'client_email': None,
+            'meeting_date': None,
+            'meeting_time': None,
+            'transcript_id': None,
+            'meeting_url': None,
+            'duration_minutes': None
         }
         
-        # Line 1 (index 0) = meeting title / file name (CRITICAL - human-readable identifier)
+        # Line 1 (index 0) = meeting title (always present)
         if len(lines) > 0:
             metadata['meeting_title'] = lines[0].strip()
         
-        # Line 3 (index 2) = actual client name
-        if len(lines) > 2:
-            metadata['client_name'] = lines[2].strip()
+        # Detect pattern by checking if Line 2 is blank (Pattern B) or has content (Pattern A)
+        is_pattern_a = len(lines) > 1 and lines[1].strip() != ""
         
-        # Line 5 (index 4) = email
-        if len(lines) > 4 and '@' in lines[4]:
-            metadata['client_email'] = lines[4].strip()
-        
-        # Line 7 (index 6) = date AND time combined (ISO format: YYYY-MM-DDTHH:MM:SS)
-        if len(lines) > 6:
-            # Extract date
-            date_match = re.search(r'(\d{4}-\d{2}-\d{2})', lines[6])
-            if date_match:
-                metadata['meeting_date'] = date_match.group(1)
+        if is_pattern_a:
+            # PATTERN A: George Padron style (no blank after title)
+            print("   📋 Detected Pattern A: George Padron style")
             
-            # Extract time from same line
-            time_match = re.search(r'T(\d{2}:\d{2}:\d{2})', lines[6])
-            if time_match:
-                metadata['meeting_time'] = time_match.group(1)
+            # Line 2 (index 1) = client name
+            if len(lines) > 1:
+                metadata['client_name'] = lines[1].strip()
+            
+            # Line 4 (index 3) = email
+            if len(lines) > 3 and '@' in lines[3]:
+                metadata['client_email'] = lines[3].strip()
+            
+            # Line 6 (index 5) = date AND time
+            if len(lines) > 5:
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', lines[5])
+                if date_match:
+                    metadata['meeting_date'] = date_match.group(1)
+                time_match = re.search(r'T(\d{2}:\d{2}:\d{2})', lines[5])
+                if time_match:
+                    metadata['meeting_time'] = time_match.group(1)
+            
+            # Line 8 (index 7) = transcript_id
+            if len(lines) > 7:
+                id_match = re.search(r'(\d+\.?\d*)', lines[7])
+                if id_match:
+                    metadata['transcript_id'] = id_match.group(1)
+            
+            # Line 10 (index 9) = meeting URL
+            if len(lines) > 9 and 'http' in lines[9]:
+                metadata['meeting_url'] = lines[9].strip()
+            
+            # Line 12 (index 11) = duration
+            if len(lines) > 11:
+                duration_match = re.search(r'(\d+\.?\d*)', lines[11])
+                if duration_match:
+                    metadata['duration_minutes'] = float(duration_match.group(1))
         
-        # Line 9 (index 8) = transcript_id (numeric value, may have decimals)
-        if len(lines) > 8:
-            id_match = re.search(r'(\d+\.?\d*)', lines[8])
-            if id_match:
-                metadata['transcript_id'] = id_match.group(1)
-        
-        # Line 11 (index 10) = meeting URL
-        if len(lines) > 10 and 'http' in lines[10]:
-            metadata['meeting_url'] = lines[10].strip()
-        
-        # Line 13 (index 12) = duration (decimal minutes)
-        if len(lines) > 12:
-            duration_match = re.search(r'(\d+\.?\d*)', lines[12])
-            if duration_match:
-                metadata['duration_minutes'] = float(duration_match.group(1))
+        else:
+            # PATTERN B: Robin Michalek style (blank line after title)
+            print("   📋 Detected Pattern B: Robin Michalek style")
+            
+            # Line 3 (index 2) = client name
+            if len(lines) > 2:
+                metadata['client_name'] = lines[2].strip()
+            
+            # Line 5 (index 4) = email
+            if len(lines) > 4 and '@' in lines[4]:
+                metadata['client_email'] = lines[4].strip()
+            
+            # Line 7 (index 6) = date AND time
+            if len(lines) > 6:
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', lines[6])
+                if date_match:
+                    metadata['meeting_date'] = date_match.group(1)
+                time_match = re.search(r'T(\d{2}:\d{2}:\d{2})', lines[6])
+                if time_match:
+                    metadata['meeting_time'] = time_match.group(1)
+            
+            # Line 9 (index 8) = transcript_id
+            if len(lines) > 8:
+                id_match = re.search(r'(\d+\.?\d*)', lines[8])
+                if id_match:
+                    metadata['transcript_id'] = id_match.group(1)
+            
+            # Line 11 (index 10) = meeting URL
+            if len(lines) > 10 and 'http' in lines[10]:
+                metadata['meeting_url'] = lines[10].strip()
+            
+            # Line 13 (index 12) = duration
+            if len(lines) > 12:
+                duration_match = re.search(r'(\d+\.?\d*)', lines[12])
+                if duration_match:
+                    metadata['duration_minutes'] = float(duration_match.group(1))
         
         return metadata
 
