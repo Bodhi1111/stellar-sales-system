@@ -223,15 +223,22 @@ class BaserowManager:
                 print(f"      ✅ DATE PARSER OUTPUT: '{date_str}' (already ISO 8601)")
                 return date_str
 
-            # Try parsing YYYY-MM-DD format
+            # Try parsing YYYY-MM-DD format (date only)
             if len(date_str) == 10 and date_str.count("-") == 2:
                 result = f"{date_str}T00:00:00Z"
                 print(f"      ✅ DATE PARSER OUTPUT: '{result}' (from YYYY-MM-DD)")
                 return result
 
+            # Try parsing YYYY-MM-DDTHH:MM:SS format (without Z)
+            if "T" in date_str and len(date_str) == 19:
+                result = f"{date_str}Z"
+                print(f"      ✅ DATE PARSER OUTPUT: '{result}' (added Z to ISO timestamp)")
+                return result
+
             # Try parsing natural language format like "October 03, 2025 at 15:30"
             # Common LLM output patterns
             formats_to_try = [
+                "%Y-%m-%dT%H:%M:%S",   # 2025-10-03T15:30:00 (ISO without Z)
                 "%B %d, %Y at %H:%M",  # October 03, 2025 at 15:30
                 "%B %d, %Y",           # October 03, 2025
                 "%Y-%m-%d %H:%M:%S",   # 2025-10-03 15:30:00
@@ -322,17 +329,31 @@ class BaserowManager:
         meeting_outcome = meeting_outcome_map.get(outcome, "Follow-up")
 
         # Format meeting_date for Baserow (ISO 8601 with timezone)
+        # Combine meeting_date and meeting_time from header metadata for full timestamp
         meeting_date_raw = crm_data.get("meeting_date", "")
+        meeting_time_raw = crm_data.get("meeting_time", "")
         meeting_date_formatted = ""
+
         if meeting_date_raw:
-            meeting_date_formatted = self._parse_date_to_iso8601(
-                meeting_date_raw)
+            # If we have both date and time, combine them into full ISO 8601 timestamp
+            if meeting_time_raw:
+                combined_datetime = f"{meeting_date_raw}T{meeting_time_raw}"
+                meeting_date_formatted = self._parse_date_to_iso8601(combined_datetime)
+            else:
+                meeting_date_formatted = self._parse_date_to_iso8601(meeting_date_raw)
+
+        # Generate transcript_filename from meeting_title (meeting_title + ".txt")
+        meeting_title = crm_data.get("meeting_title", "")
+        transcript_filename = f"{meeting_title}.txt" if meeting_title else crm_data.get("transcript_filename", "unknown.txt")
 
         meeting_data = {
             "external_id": external_id,
             "client_external_id": external_id,
             "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
-            "transcript_filename": crm_data.get("transcript_filename", ""),
+            "transcript_filename": transcript_filename,
+            "meeting_title": meeting_title,  # NEW: Add meeting_title field
+            "sales_rep": "J. Vaughan",  # NEW: Add sales_rep (currently only J. Vaughan)
+            "duration_minutes": int(round(crm_data.get("duration_minutes", 0))),  # NEW: Add duration from header (rounded to integer)
             "summary": crm_data.get("transcript_summary", ""),
             "meeting_outcome": meeting_outcome
         }
@@ -363,6 +384,9 @@ class BaserowManager:
 
     async def _upsert_deal(self, crm_data: Dict[str, Any], external_id: int) -> Dict[str, Any]:
         """Upsert deal using procedural API"""
+        print(f"   💰 UPSERT DEAL: external_id={external_id}")
+        print(f"      🔍 DEBUG: deal={crm_data.get('deal', 'MISSING')}, deposit={crm_data.get('deposit', 'MISSING')}")
+
         # Parse products and objections
         products_str = crm_data.get("product_discussed", "")
         products = []
@@ -382,17 +406,33 @@ class BaserowManager:
         if "spouse" in objections_str.lower():
             objections.append("Spouse")
 
+        # Format close_date if deal is Won
+        close_date_raw = crm_data.get("close_date", "")
+        close_date_formatted = ""
+        if close_date_raw:
+            close_date_formatted = self._parse_date_to_iso8601(close_date_raw)
+
+        deal_amount = float(crm_data.get("deal", 0))
+        deposit_amount = float(crm_data.get("deposit", 0))
+
+        print(f"      💵 Parsed: deal_amount={deal_amount}, deposit_amount={deposit_amount}")
+
         deal_data = {
             "external_id": external_id,
             "client_id": external_id,
             "meeting_id": external_id,
             "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
             "products_discussed": products,
-            "deal_amount": float(crm_data.get("deal", 0)),
-            "deposit_amount": float(crm_data.get("deposit", 0)),
+            "deal_amount": deal_amount,
+            "deposit_amount": deposit_amount,
+            "win_probability": float(crm_data.get("win_probability", 0.5)),  # NEW: Win probability (0.0 to 1.0)
             "next_action": crm_data.get("action_items", ""),
             "objections": objections
         }
+
+        # Only include close_date if we have a valid ISO 8601 date
+        if close_date_formatted and close_date_formatted.strip():
+            deal_data["close_date"] = close_date_formatted
 
         # Transform field names to field IDs
         deal_data_with_ids = self._transform_to_field_ids(

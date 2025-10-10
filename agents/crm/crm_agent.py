@@ -45,6 +45,7 @@ class CRMAgent(BaseAgent):
         self,
         extracted_data: Dict[str, Any],
         chunks: Optional[List[str]] = None,  # NEW: Accept transcript chunks
+        header_metadata: Optional[Dict[str, Any]] = None,  # NEW: Header metadata from parser
         email_draft: Optional[str] = None,
         social_opportunities: Optional[Any] = None,
         coaching_insights: Optional[Any] = None,
@@ -56,6 +57,7 @@ class CRMAgent(BaseAgent):
         Args:
             extracted_data: Base customer/meeting data from Extractor
             chunks: Full transcript chunks for detailed analysis (NEW!)
+            header_metadata: Extracted header metadata (meeting_title, client_name, email, date, etc.)
             email_draft: Follow-up email content from Email Agent
             social_opportunities: Social content from Social Agent
             coaching_insights: Performance feedback from Sales Coach Agent
@@ -69,6 +71,7 @@ class CRMAgent(BaseAgent):
         # Handle None values and ensure dict types
         extracted_data = extracted_data or {}
         chunks = chunks or []  # Default to empty list if no chunks provided
+        header_metadata = header_metadata or {}  # Default to empty dict
         social_opportunities = social_opportunities or {}
         coaching_insights = coaching_insights or {}
         email_draft = email_draft or ""
@@ -79,7 +82,7 @@ class CRMAgent(BaseAgent):
         try:
             # Generate comprehensive CRM record
             crm_record = await self._build_comprehensive_crm_record(
-                extracted_data, chunks, email_draft, social_opportunities, coaching_insights, file_path
+                extracted_data, chunks, header_metadata, email_draft, social_opportunities, coaching_insights, file_path
             )
 
             print(
@@ -91,13 +94,14 @@ class CRMAgent(BaseAgent):
             print(f"   📋 Falling back to basic CRM record")
             # Fallback to basic record that maintains compatibility
             return await self._build_basic_crm_record(
-                extracted_data, chunks, email_draft, social_opportunities, coaching_insights, file_path
+                extracted_data, chunks, header_metadata, email_draft, social_opportunities, coaching_insights, file_path
             )
 
     async def _build_comprehensive_crm_record(
         self,
         extracted_data: Dict[str, Any],
         chunks: List[str],  # NEW: Accept chunks for full transcript analysis
+        header_metadata: Dict[str, Any],  # NEW: Header metadata from parser
         email_draft: str,
         social_opportunities: Dict[str, Any],
         coaching_insights: Dict[str, Any],
@@ -109,8 +113,31 @@ class CRMAgent(BaseAgent):
         transcript_id = str(uuid.uuid4())[:8]  # Short unique ID
         current_timestamp = datetime.now()
 
+        # PRIORITY 1: Use header metadata if available (fast + accurate)
+        if header_metadata:
+            print("   ✅ Using header metadata for CRM fields (accurate + fast)")
+
         # Extract enhanced data using LLM with FULL TRANSCRIPT for missing fields
         enhanced_extraction = await self._extract_missing_fields(extracted_data, chunks)
+
+        # PRIORITY ORDER: header_metadata > extracted_data > enhanced_extraction (LLM)
+        # This ensures fast, accurate data from headers is used first
+        client_name = (
+            header_metadata.get('client_name') if header_metadata.get('client_name')
+            else extracted_data.get("client_name") or enhanced_extraction.get("client_name", "")
+        )
+        client_email = (
+            header_metadata.get('client_email') if header_metadata.get('client_email')
+            else extracted_data.get("client_email") or enhanced_extraction.get("client_email", "")
+        )
+        meeting_date = (
+            header_metadata.get('meeting_date') if header_metadata.get('meeting_date')
+            else self._extract_meeting_date(extracted_data, current_timestamp)
+        )
+        meeting_title = header_metadata.get('meeting_title', '') if header_metadata else ''
+        transcript_id_from_header = header_metadata.get('transcript_id', '') if header_metadata else ''
+        meeting_time = header_metadata.get('meeting_time', '') if header_metadata else ''
+        duration_minutes = header_metadata.get('duration_minutes', 0) if header_metadata else 0
 
         # Build comprehensive CRM record
         crm_record = {
@@ -120,14 +147,17 @@ class CRMAgent(BaseAgent):
             "next_steps": extracted_data.get("next_steps", ""),
 
             # === CORE MEETING DATA ===
-            "transcript_id": transcript_id,
-            "meeting_date": self._extract_meeting_date(extracted_data, current_timestamp),
+            "transcript_id": transcript_id_from_header or transcript_id,  # Prefer header ID
+            "meeting_title": meeting_title,  # NEW: Human-readable meeting identifier
+            "meeting_date": meeting_date,
+            "meeting_time": meeting_time,  # NEW: Time component from header
+            "duration_minutes": duration_minutes,  # NEW: Meeting duration from header
             "timestamp": current_timestamp.isoformat(),
             "transcript_filename": file_path.name if file_path else "unknown.txt",
 
             # === CLIENT INFORMATION ===
-            "client_name": extracted_data.get("client_name") or enhanced_extraction.get("client_name", ""),
-            "client_email": extracted_data.get("client_email") or enhanced_extraction.get("client_email", ""),
+            "client_name": client_name,  # Prioritized from header
+            "client_email": client_email,  # Prioritized from header
 
             # === CLIENT PROFILE (Estate Planning Specific) ===
             "marital_status": enhanced_extraction.get("marital_status", ""),
@@ -145,6 +175,12 @@ class CRMAgent(BaseAgent):
             "objections_raised": self._consolidate_objections(extracted_data),
             "outcome": self._determine_outcome(extracted_data, enhanced_extraction),
             "action_items": self._extract_next_steps(extracted_data, email_draft),
+
+            # === DEAL TRACKING (NEW) ===
+            # Set close_date to meeting_date if deal is Won
+            "close_date": meeting_date if self._determine_outcome(extracted_data, enhanced_extraction) == "Won" else "",
+            # Set win_probability based on outcome (1.0 = Won, 0.0 = Lost, 0.5 = Pending)
+            "win_probability": self._calculate_win_probability(self._determine_outcome(extracted_data, enhanced_extraction)),
 
             # === CONTENT AND INSIGHTS ===
             "transcript_summary": extracted_data.get("summary", enhanced_extraction.get("summary", "")),
@@ -172,8 +208,127 @@ class CRMAgent(BaseAgent):
 
         return crm_record
 
+    def _extract_dollar_amounts(self, full_transcript: str) -> Dict[str, float]:
+        """
+        REGEX-BASED dollar amount extraction from ENTIRE transcript.
+        Uses CONFIDENCE SCORING to identify final deal total vs component prices.
+
+        Based on user annotations: "that would bring the entirety of your balance to is just $3,225 for everything"
+        """
+        import re
+
+        # Find all dollar amounts
+        pattern = r'\$([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)'
+        amounts_found = []
+
+        for match in re.finditer(pattern, full_transcript):
+            amount_str = match.group(1).replace(',', '')
+            amount = float(amount_str)
+
+            # Get LARGER context window (200 chars) for better phrase matching
+            context_start = max(0, match.start() - 150)
+            context_end = min(len(full_transcript), match.end() + 150)
+            context = full_transcript[context_start:context_end].lower()
+
+            amounts_found.append({
+                'amount': amount,
+                'context': context,
+                'position': match.start()
+            })
+
+        # Confidence scoring system
+        best_deal_candidate = None
+        best_deal_score = 0
+        best_deposit_candidate = None
+        best_deposit_score = 0
+
+        last_30_percent = len(full_transcript) * 0.7
+
+        for item in amounts_found:
+            # Skip large amounts (likely estate values > $100k)
+            if item['amount'] > 100000:
+                continue
+
+            # === DEAL AMOUNT CONFIDENCE SCORING ===
+            deal_score = 0
+
+            # High-confidence final total phrases (from user annotation)
+            final_total_kw = [
+                'bring the entirety', 'bring your balance', 'bring the balance',
+                'is just', 'for everything', 'entirety of your balance',
+                'balance to is', 'final balance', 'total balance'
+            ]
+
+            # Medium-confidence deal keywords
+            deal_kw = ['balance', 'total', 'entirety', 'everything', 'bring', 'price', 'fee', 'cost']
+
+            # Low-confidence partial payment keywords (reduce score)
+            partial_kw = ['down', 'deposit', 'upfront', 'initial', 'first payment', 'half']
+
+            # Position scoring (closing section = higher confidence)
+            in_closing = item['position'] > last_30_percent
+
+            # Calculate deal score
+            if any(kw in item['context'] for kw in final_total_kw):
+                deal_score += 5  # Very high confidence for exact phrases
+
+            if any(kw in item['context'] for kw in deal_kw):
+                deal_score += 2  # Medium confidence
+
+            if in_closing:
+                deal_score += 3  # Higher confidence in closing section
+
+            # REDUCE score if it looks like a partial payment
+            if any(kw in item['context'] for kw in partial_kw):
+                deal_score -= 2
+
+            # Check for amounts between $1k-$50k (typical deal range)
+            if 1000 <= item['amount'] <= 50000:
+                deal_score += 1
+
+            # Update best candidate if this has higher score
+            if deal_score > best_deal_score:
+                best_deal_score = deal_score
+                best_deal_candidate = item
+                print(f"      🎯 New best deal candidate: ${item['amount']} (score={deal_score})")
+                print(f"         Context: ...{item['context'][:80]}...")
+
+            # === DEPOSIT AMOUNT SCORING ===
+            deposit_score = 0
+            deposit_kw = ['deposit', 'down payment', 'upfront', 'initial', 'today', 'now', 'first payment']
+
+            if any(kw in item['context'] for kw in deposit_kw):
+                deposit_score += 3
+
+            # Skip large amounts (deposits should be < $10k typically)
+            if item['amount'] > 10000:
+                deposit_score = 0
+
+            # Prefer amounts in closing section
+            if in_closing and deposit_score > 0:
+                deposit_score += 2
+
+            if deposit_score > best_deposit_score:
+                best_deposit_score = deposit_score
+                best_deposit_candidate = item
+
+        # Extract final amounts
+        deal_amount = best_deal_candidate['amount'] if best_deal_candidate else 0
+        deposit_amount = best_deposit_candidate['amount'] if best_deposit_candidate else 0
+
+        if best_deal_candidate:
+            print(f"      ✅ FINAL: Selected deal=${deal_amount} with confidence score={best_deal_score}")
+        if best_deposit_candidate:
+            print(f"      ✅ FINAL: Selected deposit=${deposit_amount} with confidence score={best_deposit_score}")
+
+        return {'deal_amount': deal_amount, 'deposit_amount': deposit_amount}
+
     async def _extract_missing_fields(self, extracted_data: Dict[str, Any], chunks: List[str]) -> Dict[str, Any]:
-        """Use LLM to extract estate planning specific fields from FULL TRANSCRIPT"""
+        """Extract fields using HYBRID strategy: REGEX + LLM
+
+        Pass 1: REGEX for dollar amounts (fast, accurate, scans ENTIRE transcript)
+        Pass 2: LLM for contextual fields (outcome, marital status, etc.)
+        """
 
         # Handle chunks (can be list of strings OR list of dicts with 'text' key)
         if chunks and isinstance(chunks[0], dict):
@@ -181,20 +336,40 @@ class CRMAgent(BaseAgent):
         else:
             chunk_texts = chunks if chunks else []
 
-        # Combine chunks into full transcript for comprehensive analysis
+        # Combine chunks
         full_transcript = "\n\n".join(chunk_texts) if chunk_texts else ""
+        transcript_length = len(full_transcript)
 
-        # Create a focused prompt for estate planning data extraction
+        # PASS 1: REGEX extraction (searches ENTIRE transcript)
+        print("   💰 REGEX: Scanning transcript for dollar amounts...")
+        regex_amounts = self._extract_dollar_amounts(full_transcript)
+        print(f"      💵 REGEX found: deal=${regex_amounts['deal_amount']}, deposit=${regex_amounts['deposit_amount']}")
+
+        # PASS 2: LLM extraction for contextual data
+
+        # PASS 1: Extract CLIENT DETAILS from beginning (first 3000 chars)
+        client_section = full_transcript[:3000]
+
+        # PASS 2: Extract FINANCIAL DATA from end (last 6000 chars - CRITICAL FOR CLOSING)
+        # This is where "I'm ready to move forward", credit card processing, and amounts appear
+        financial_section = full_transcript[max(0, transcript_length - 6000):]
+
+        # Create targeted prompt with BOTH sections but emphasize financial
         prompt = f"""
-        Analyze this sales conversation transcript for estate planning specific information.
+        Analyze this sales conversation for estate planning information.
 
-        FULL TRANSCRIPT:
-        {full_transcript[:8000]}  # Limit to 8000 chars to avoid token limits
+        BEGINNING (Client details):
+        {client_section}
 
-        ADDITIONAL CONTEXT (extracted summary):
+        ... [middle section omitted] ...
+
+        END OF TRANSCRIPT (CRITICAL - Deal closing, payment, final decision):
+        {financial_section}
+
+        ADDITIONAL CONTEXT:
         {json.dumps(extracted_data, indent=2)}
 
-        Extract the following estate planning fields (use "not_found" if information not available):
+        Extract the following fields (use "not_found" if not mentioned):
 
         1. Client personal details:
            - client_name (full name of the client/prospect)
@@ -207,13 +382,28 @@ class CRMAgent(BaseAgent):
            - real_estate_count (number of properties)
            - llc_interest (any LLC or business interests mentioned)
 
-        3. Financial terms:
-           - deal_amount (total estate planning service cost in dollars, number only)
-           - deposit_amount (any deposit or partial payment mentioned in dollars, number only)
+        3. Financial terms (CRITICAL - Look for payment discussions near end of transcript):
+           - deal_amount (total service cost in dollars - look for phrases like "$3,200", "three thousand", payment amounts)
+           - deposit_amount (initial payment or deposit in dollars)
 
-        4. Meeting outcome:
+           IMPORTANT: Search the ENTIRE transcript for dollar amounts, especially:
+           - Around timestamps 01:00:00 and later (closing phase)
+           - When discussing "moving forward", "let's do it", "ready to proceed"
+           - Payment plan discussions, credit card processing
+           - Look for patterns like "$X,XXX" or "X thousand" or "X hundred"
+
+        4. Meeting outcome (CRITICAL - Detect deal closure):
            - summary (brief meeting summary)
-           - outcome_indication (Won/Lost/Pending based on conversation tone)
+           - outcome_indication (Won/Lost/Pending)
+
+           Mark as "Won" if you see:
+           - Client agrees to move forward ("I'm ready", "let's do it", "moving forward")
+           - Payment/credit card processing happens
+           - Deposit or deal amount mentioned with agreement
+           - Next steps scheduled with commitment language
+
+           Mark as "Lost" if client explicitly declines
+           Mark as "Pending" if unclear or still considering
 
         Respond ONLY in JSON format:
         {{
@@ -224,10 +414,10 @@ class CRMAgent(BaseAgent):
             "estate_value": 500000,
             "real_estate_count": 1,
             "llc_interest": "Tech startup LLC",
-            "deal_amount": 15000,
-            "deposit_amount": 5000,
+            "deal_amount": 3200,
+            "deposit_amount": 700,
             "summary": "Discussion about estate planning needs",
-            "outcome_indication": "Pending"
+            "outcome_indication": "Won"
         }}
         """
 
@@ -265,12 +455,24 @@ class CRMAgent(BaseAgent):
                     else:
                         cleaned_result[key] = ""
 
-            print("   ✅ Enhanced extraction completed with LLM analysis")
+            # MERGE: Override LLM amounts with REGEX amounts (more accurate)
+            if regex_amounts['deal_amount'] > 0:
+                cleaned_result['deal_amount'] = regex_amounts['deal_amount']
+                print(f"      ✅ Using REGEX deal_amount: ${regex_amounts['deal_amount']}")
+            if regex_amounts['deposit_amount'] > 0:
+                cleaned_result['deposit_amount'] = regex_amounts['deposit_amount']
+                print(f"      ✅ Using REGEX deposit_amount: ${regex_amounts['deposit_amount']}")
+
+            print("   ✅ Enhanced extraction completed (HYBRID: REGEX + LLM)")
             return cleaned_result
 
         except Exception as e:
             print(f"   ⚠️ Warning: Enhanced extraction failed: {e}")
-            return {}
+            # Still return REGEX amounts even if LLM fails
+            return {
+                'deal_amount': regex_amounts.get('deal_amount', 0),
+                'deposit_amount': regex_amounts.get('deposit_amount', 0)
+            }
 
     def _extract_meeting_date(self, extracted_data: Dict[str, Any], fallback: datetime) -> str:
         """Extract or determine meeting date"""
@@ -339,6 +541,17 @@ class CRMAgent(BaseAgent):
             return "Follow-up Scheduled"
         else:
             return "Pending"
+
+    def _calculate_win_probability(self, outcome: str) -> float:
+        """Calculate win probability based on deal outcome (0.0 to 1.0)"""
+        probability_map = {
+            "Won": 1.0,
+            "Lost": 0.0,
+            "Pending": 0.5,
+            "Follow-up Scheduled": 0.6,
+            "Needs More Info": 0.4
+        }
+        return probability_map.get(outcome, 0.5)
 
     def _extract_next_steps(self, extracted_data: Dict[str, Any], email_draft: str) -> str:
         """Extract and consolidate next steps"""
@@ -461,6 +674,7 @@ class CRMAgent(BaseAgent):
         self,
         extracted_data: Dict[str, Any],
         chunks: List[str],  # Accept chunks for consistency
+        header_metadata: Dict[str, Any],  # NEW: Header metadata
         email_draft: str,
         social_opportunities: Dict[str, Any],
         coaching_insights: Dict[str, Any],

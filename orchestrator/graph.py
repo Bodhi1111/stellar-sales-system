@@ -198,6 +198,7 @@ async def crm_node(state: AgentState) -> Dict[str, Any]:
     crm_data = await crm_agent.run(
         extracted_data=state.get("extracted_data", {}),
         chunks=state["chunks"],
+        header_metadata=state.get("header_metadata"),  # NEW: Pass header metadata for accurate client data
         email_draft=state.get("email_draft"),
         social_opportunities=state.get("social_content"),
         coaching_insights=state.get("coaching_feedback")
