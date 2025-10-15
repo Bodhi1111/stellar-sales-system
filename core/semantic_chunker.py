@@ -1,298 +1,398 @@
 """
-Semantic Dialogue Chunker
+Semantic Dialogue Chunker - Parent-Child Architecture
 
-Dialogue-turn-aware semantic chunking that respects:
-1. Dialogue turn boundaries (never split within a turn)
-2. Semantic coherence (group related Q&A exchanges)
-3. Conversation phase boundaries (natural topic shifts)
-4. Entity preservation (never split entities across chunks)
-5. Optimal overlap (1-2 dialogue turns for context preservation)
+Creates two-level chunking hierarchy:
+1. CHILD CHUNKS: Individual speaker turns (embedded in vector DB)
+   - Each speaker turn = 1 child chunk
+   - Precise, focused embeddings for high-precision retrieval
+   - Rich metadata (speaker, timestamp, intent, sentiment, topics)
 
-Best Practices:
-- Chunks represent complete semantic units (Q&A pairs, topic segments)
-- 10-20% overlap at turn level (not character level)
-- Preserve NER metadata within chunks
-- Use conversation phases as natural split points
+2. PARENT CHUNKS: Conversation phase segments (stored, not embedded)
+   - Groups 5-10 related speaker turns by conversation phase
+   - Provides broader context when child chunk matches
+   - Links to children via parent_id
+
+Parent-Child Linking:
+- Each child chunk has a parent_id UUID
+- Parent chunks contain list of child_chunk_ids
+- Retrieval: Find children via vector search, return parent context
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from collections import Counter
+import uuid
 
 
 class SemanticDialogueChunker:
     """
-    Creates semantically coherent chunks from dialogue turns.
-    Respects conversation structure and never splits mid-turn or mid-entity.
+    Creates parent-child chunk hierarchy from dialogue turns.
+
+    Child chunks: Individual speaker turns (1 turn = 1 chunk)
+    Parent chunks: Conversation phase segments (5-10 turns grouped)
     """
 
     def __init__(
         self,
-        target_chunk_size: int = 1400,  # Target characters per chunk
-        min_chunk_size: int = 700,      # Minimum chunk size (50% of target)
-        max_chunk_size: int = 2100,     # Maximum chunk size (150% of target)
-        overlap_turns: int = 2          # Number of turns to overlap between chunks
+        turns_per_parent: int = 7,  # Target turns per parent chunk (5-10 range)
+        min_turns_per_parent: int = 5,  # Minimum turns before creating new parent
+        max_turns_per_parent: int = 10  # Maximum turns before forcing new parent
     ):
         """
-        Initialize semantic dialogue chunker.
+        Initialize parent-child chunker.
 
         Args:
-            target_chunk_size: Target chunk size in characters (~350 tokens)
-            min_chunk_size: Minimum acceptable chunk size
-            max_chunk_size: Maximum chunk size before forced split
-            overlap_turns: Number of dialogue turns to overlap (for context)
+            turns_per_parent: Target number of speaker turns per parent chunk
+            min_turns_per_parent: Minimum turns for a parent chunk
+            max_turns_per_parent: Maximum turns before forcing split
         """
-        self.target_chunk_size = target_chunk_size
-        self.min_chunk_size = min_chunk_size
-        self.max_chunk_size = max_chunk_size
-        self.overlap_turns = overlap_turns
+        self.turns_per_parent = turns_per_parent
+        self.min_turns_per_parent = min_turns_per_parent
+        self.max_turns_per_parent = max_turns_per_parent
 
     def chunk_dialogue(
         self,
         structured_dialogue: List[Dict[str, Any]],
-        conversation_phases: List[Dict[str, Any]] = None
-    ) -> List[List[Dict[str, Any]]]:
+        conversation_phases: List[Dict[str, Any]] = None,
+        external_id: str = None
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Chunk dialogue turns into semantically coherent segments.
+        Create parent-child chunk hierarchy from dialogue turns.
 
         Strategy:
-        1. Use conversation phases as primary split points
-        2. Within phases, create chunks of ~target_chunk_size characters
-        3. Respect dialogue turn boundaries (never split a turn)
-        4. Add overlap_turns from previous chunk for context
-        5. Preserve all metadata (phase, intent, sentiment, entities)
+        1. Each speaker turn becomes a CHILD chunk (with UUID)
+        2. Group 5-10 child chunks into PARENT chunks by conversation phase
+        3. Link children to parents via parent_id
+        4. Preserve all metadata (speaker, timestamp, intent, sentiment, topics)
 
         Args:
             structured_dialogue: List of enriched dialogue turns
             conversation_phases: List of conversation phase boundaries
+            external_id: Transcript ID for linking chunks
 
         Returns:
-            List of chunk lists (each chunk is a list of dialogue turns)
+            Tuple of (child_chunks, parent_chunks)
+            - child_chunks: List of individual speaker turn chunks with parent_id
+            - parent_chunks: List of conversation phase segment chunks with child_chunk_ids
         """
         if not structured_dialogue:
-            return []
+            return [], []
 
-        chunks = []
+        # Step 1: Create child chunks (1 turn = 1 chunk)
+        child_chunks = self._create_child_chunks(structured_dialogue, external_id)
 
-        if conversation_phases and len(conversation_phases) > 1:
-            # Strategy 1: Phase-based chunking (natural topic boundaries)
-            chunks = self._chunk_by_phases(structured_dialogue, conversation_phases)
-        else:
-            # Strategy 2: Size-based chunking (no clear phases)
-            chunks = self._chunk_by_size(structured_dialogue)
+        # Step 2: Group children into parents by conversation phase
+        parent_chunks = self._create_parent_chunks(child_chunks, conversation_phases, external_id)
 
-        # Add overlap between chunks
-        chunks_with_overlap = self._add_overlap(chunks)
+        # Step 3: Link children to parents
+        self._link_children_to_parents(child_chunks, parent_chunks)
 
-        return chunks_with_overlap
+        return child_chunks, parent_chunks
 
-    def _chunk_by_phases(
+    def _create_child_chunks(
         self,
-        dialogue: List[Dict[str, Any]],
-        phases: List[Dict[str, Any]]
+        structured_dialogue: List[Dict[str, Any]],
+        external_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Create child chunks: 1 speaker turn = 1 child chunk.
+
+        Each child chunk is a complete speaker turn with:
+        - Unique chunk_id (UUID)
+        - Speaker metadata (name, timestamp)
+        - Semantic metadata (intent, sentiment, topics)
+        - Sales metadata (sales_stage, detected_topics)
+        - parent_id (assigned later)
+        """
+        child_chunks = []
+
+        for idx, turn in enumerate(structured_dialogue):
+            # Generate unique chunk ID
+            chunk_id = str(uuid.uuid4())
+
+            # Extract timestamp in seconds (convert HH:MM:SS to seconds)
+            timestamp_str = turn.get("timestamp", "00:00:00")
+            start_time = self._timestamp_to_seconds(timestamp_str)
+
+            # Estimate end time (next turn's start or +15 seconds)
+            if idx + 1 < len(structured_dialogue):
+                next_timestamp = structured_dialogue[idx + 1].get("timestamp", "00:00:00")
+                end_time = self._timestamp_to_seconds(next_timestamp)
+            else:
+                end_time = start_time + 15.0  # Default 15 second turn
+
+            # Detect topics from text (simple keyword extraction)
+            detected_topics = self._extract_topics(turn.get("text", ""))
+
+            # Map conversation_phase to sales_stage
+            sales_stage = self._phase_to_sales_stage(turn.get("conversation_phase"))
+
+            child_chunk = {
+                "chunk_id": chunk_id,
+                "parent_id": None,  # Assigned later
+                "chunk_type": "child",
+                "external_id": external_id,
+                "text": turn.get("text", ""),
+                "speaker_name": turn.get("speaker", "Unknown"),
+                "start_time": start_time,
+                "end_time": end_time,
+                "sales_stage": sales_stage,
+                "conversation_phase": turn.get("conversation_phase"),
+                "detected_topics": detected_topics,
+                "intent": turn.get("intent"),
+                "sentiment": turn.get("sentiment"),
+                "discourse_marker": turn.get("discourse_marker"),
+                "contains_entity": turn.get("contains_entity", False),
+                "timestamp": timestamp_str,  # Keep original format
+                "turn_index": idx
+            }
+
+            child_chunks.append(child_chunk)
+
+        return child_chunks
+
+    def _create_parent_chunks(
+        self,
+        child_chunks: List[Dict[str, Any]],
+        conversation_phases: List[Dict[str, Any]],
+        external_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Create parent chunks by grouping 5-10 child chunks by conversation phase.
+
+        Each parent chunk:
+        - Groups children from same conversation phase
+        - Contains aggregated text from all children
+        - Has metadata: phase, timestamp range, turn count, speaker balance
+        - Links to children via child_chunk_ids list
+        """
+        parent_chunks = []
+
+        if conversation_phases and len(conversation_phases) > 0:
+            # Group by conversation phase
+            for phase in conversation_phases:
+                phase_name = phase.get("phase")
+
+                # Find all child chunks in this phase
+                phase_children = [
+                    c for c in child_chunks
+                    if c.get("conversation_phase") == phase_name
+                ]
+
+                if not phase_children:
+                    continue
+
+                # Split large phases into multiple parents (5-10 turns each)
+                parent_groups = self._group_children_into_parents(phase_children)
+
+                for group in parent_groups:
+                    parent_chunk = self._build_parent_from_children(group, external_id)
+                    parent_chunks.append(parent_chunk)
+
+        else:
+            # No phases, group by turn count only
+            parent_groups = self._group_children_into_parents(child_chunks)
+            for group in parent_groups:
+                parent_chunk = self._build_parent_from_children(group, external_id)
+                parent_chunks.append(parent_chunk)
+
+        return parent_chunks
+
+    def _group_children_into_parents(
+        self,
+        children: List[Dict[str, Any]]
     ) -> List[List[Dict[str, Any]]]:
         """
-        Chunk dialogue using conversation phase boundaries.
-        Each phase becomes one or more chunks.
+        Group children into parent-sized groups (5-10 turns).
         """
-        chunks = []
+        groups = []
+        current_group = []
 
-        # Group turns by phase
-        for phase in phases:
-            phase_name = phase.get("phase")
-            phase_start = phase.get("start_timestamp")
-            phase_end = phase.get("end_timestamp")
+        for child in children:
+            current_group.append(child)
 
-            # Find turns in this phase
-            phase_turns = []
-            for turn in dialogue:
-                turn_time = turn.get("timestamp")
-                turn_phase = turn.get("conversation_phase")
+            # Create new parent when we reach target size
+            if len(current_group) >= self.turns_per_parent:
+                groups.append(current_group)
+                current_group = []
 
-                # Match by phase name or timestamp range
-                if turn_phase == phase_name or (
-                    phase_start and phase_end and
-                    phase_start <= turn_time <= phase_end
-                ):
-                    phase_turns.append(turn)
-
-            # If phase is too large, split it
-            if phase_turns:
-                phase_chunks = self._split_large_phase(phase_turns)
-                chunks.extend(phase_chunks)
-
-        # Handle turns not assigned to any phase
-        unassigned_turns = [t for t in dialogue if t.get("conversation_phase") is None]
-        if unassigned_turns:
-            unassigned_chunks = self._chunk_by_size(unassigned_turns)
-            chunks.extend(unassigned_chunks)
-
-        return chunks
-
-    def _split_large_phase(self, turns: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        """
-        Split a large conversation phase into multiple chunks if needed.
-        """
-        total_chars = sum(len(t.get("text", "")) for t in turns)
-
-        if total_chars <= self.max_chunk_size:
-            # Phase fits in one chunk
-            return [turns]
-
-        # Phase is too large, split by size
-        return self._chunk_by_size(turns)
-
-    def _chunk_by_size(self, turns: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        """
-        Create chunks based on target size, respecting turn boundaries.
-        """
-        chunks = []
-        current_chunk = []
-        current_size = 0
-
-        for turn in turns:
-            turn_text = turn.get("text", "")
-            turn_size = len(turn_text)
-
-            # Check if adding this turn exceeds max size
-            if current_size + turn_size > self.max_chunk_size and current_chunk:
-                # Save current chunk and start new one
-                chunks.append(current_chunk)
-                current_chunk = []
-                current_size = 0
-
-            # Add turn to current chunk
-            current_chunk.append(turn)
-            current_size += turn_size
-
-            # Check if we've reached target size (soft limit)
-            if current_size >= self.target_chunk_size and current_size <= self.max_chunk_size:
-                # Check if next turn would push us over max
-                # If so, end chunk here
-                next_turn_size = len(turns[turns.index(turn) + 1].get("text", "")) if turns.index(turn) + 1 < len(turns) else 0
-                if current_size + next_turn_size > self.max_chunk_size:
-                    chunks.append(current_chunk)
-                    current_chunk = []
-                    current_size = 0
-
-        # Add final chunk if not empty
-        if current_chunk:
-            # Only add if it meets minimum size OR it's the only chunk
-            if current_size >= self.min_chunk_size or len(chunks) == 0:
-                chunks.append(current_chunk)
+        # Add final group if not empty
+        if current_group:
+            # Merge with last group if too small
+            if len(current_group) < self.min_turns_per_parent and groups:
+                groups[-1].extend(current_group)
             else:
-                # Too small, merge with previous chunk
-                if chunks:
-                    chunks[-1].extend(current_chunk)
+                groups.append(current_group)
 
-        return chunks
+        return groups
 
-    def _add_overlap(self, chunks: List[List[Dict[str, Any]]]) -> List[List[Dict[str, Any]]]:
+    def _build_parent_from_children(
+        self,
+        children: List[Dict[str, Any]],
+        external_id: str
+    ) -> Dict[str, Any]:
         """
-        Add overlap between chunks for context preservation.
-        Includes last N turns from previous chunk at start of next chunk.
+        Build parent chunk from group of children.
         """
-        if len(chunks) <= 1:
-            return chunks
+        parent_id = str(uuid.uuid4())
 
-        overlapped_chunks = [chunks[0]]  # First chunk has no overlap
+        # Aggregate text from all children
+        texts = [c["text"] for c in children]
+        parent_text = "\n".join([
+            f"[{c['timestamp']}] {c['speaker_name']}: {c['text']}"
+            for c in children
+        ])
 
-        for i in range(1, len(chunks)):
-            prev_chunk = chunks[i - 1]
-            current_chunk = chunks[i]
-
-            # Get last N turns from previous chunk
-            overlap_turns = prev_chunk[-self.overlap_turns:] if len(prev_chunk) >= self.overlap_turns else prev_chunk
-
-            # Prepend overlap to current chunk
-            overlapped_chunk = overlap_turns + current_chunk
-            overlapped_chunks.append(overlapped_chunk)
-
-        return overlapped_chunks
-
-    def turns_to_text(self, turns: List[Dict[str, Any]], format: str = "dialogue") -> str:
-        """
-        Convert dialogue turns to formatted text.
-
-        Args:
-            turns: List of dialogue turn dictionaries
-            format: "dialogue" (timestamped) or "plain" (text only)
-
-        Returns:
-            Formatted text string
-        """
-        if format == "dialogue":
-            # Format: [HH:MM:SS] Speaker: Text
-            lines = []
-            for turn in turns:
-                timestamp = turn.get("timestamp", "00:00:00")
-                speaker = turn.get("speaker", "Unknown")
-                text = turn.get("text", "")
-                lines.append(f"[{timestamp}] {speaker}: {text}")
-            return "\n".join(lines)
-        else:
-            # Plain text
-            return " ".join(turn.get("text", "") for turn in turns)
-
-    def compute_chunk_metadata(self, turns: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Compute metadata for a chunk from its constituent turns.
-
-        Returns rich metadata for storage in vector DB:
-        - Conversation phase (most common)
-        - Speakers and speaker balance
-        - Timestamp range
-        - Semantic NLP metadata (intent, sentiment)
-        - Entity presence
-        - Turn count
-        - Question/objection indicators
-        """
-        if not turns:
-            return {}
-
-        # Basic metadata
-        timestamps = [t.get("timestamp") for t in turns if t.get("timestamp")]
-        speakers = [t.get("speaker") for t in turns if t.get("speaker")]
-        phases = [t.get("conversation_phase") for t in turns if t.get("conversation_phase")]
-
-        # Conversation phase (most common)
-        phase = max(set(phases), key=phases.count) if phases else None
-
-        # Speakers
+        # Aggregate metadata
+        timestamps = [c["timestamp"] for c in children]
+        speakers = [c["speaker_name"] for c in children]
         unique_speakers = list(set(speakers))
-        speaker_counts = Counter(speakers)
 
-        # Speaker balance (ratio of client to rep turns)
-        client_keywords = ["client", "iphone", "caller"]  # Common client identifiers
+        # Speaker balance
+        client_keywords = ["client", "iphone", "caller"]
         client_turns = sum(1 for s in speakers if any(kw in s.lower() for kw in client_keywords))
-        speaker_balance = client_turns / len(speakers) if speakers else 0.5
+        speaker_balance = round(client_turns / len(speakers), 2) if speakers else 0.5
 
-        # Semantic NLP metadata
-        intents = [t.get("intent") for t in turns if t.get("intent")]
-        sentiments = [t.get("sentiment") for t in turns if t.get("sentiment")]
-        discourse_markers = [t.get("discourse_marker") for t in turns if t.get("discourse_marker") and t.get("discourse_marker") != "none"]
+        # Most common phase
+        phases = [c.get("conversation_phase") for c in children if c.get("conversation_phase")]
+        conversation_phase = max(set(phases), key=phases.count) if phases else None
 
-        dominant_intent = max(set(intents), key=intents.count) if intents else None
-        dominant_sentiment = max(set(sentiments), key=sentiments.count) if sentiments else None
+        # Sales stage
+        sales_stage = self._phase_to_sales_stage(conversation_phase)
 
-        # Entity presence
-        contains_entities = any(t.get("contains_entity") for t in turns)
-
-        # Question/objection indicators
-        question_count = sum(1 for i in intents if i == "question")
-        objection_count = sum(1 for i in intents if i == "objection")
+        # Aggregate topics
+        all_topics = []
+        for c in children:
+            topics = c.get("detected_topics", [])
+            if isinstance(topics, list):
+                all_topics.extend(topics)
+        detected_topics = list(set(all_topics))[:10]  # Top 10 unique topics
 
         return {
-            "conversation_phase": phase,
-            "speakers": unique_speakers,
-            "speaker_balance": round(speaker_balance, 2),
+            "chunk_id": parent_id,
+            "parent_id": None,  # Parents have no parent
+            "chunk_type": "parent",
+            "external_id": external_id,
+            "text": parent_text,
+            "conversation_phase": conversation_phase,
+            "sales_stage": sales_stage,
+            "detected_topics": detected_topics,
             "timestamp_start": timestamps[0] if timestamps else None,
             "timestamp_end": timestamps[-1] if timestamps else None,
-            "turn_count": len(turns),
-            "dominant_intent": dominant_intent,
-            "dominant_sentiment": dominant_sentiment,
-            "contains_entities": contains_entities,
-            "discourse_markers": list(set(discourse_markers)),
-            "question_count": question_count,
-            "objection_count": objection_count,
-            "has_objections": objection_count > 0
+            "start_time": children[0]["start_time"],
+            "end_time": children[-1]["end_time"],
+            "turn_count": len(children),
+            "speaker_balance": speaker_balance,
+            "speakers": unique_speakers,
+            "child_chunk_ids": [c["chunk_id"] for c in children]
         }
+
+    def _link_children_to_parents(
+        self,
+        child_chunks: List[Dict[str, Any]],
+        parent_chunks: List[Dict[str, Any]]
+    ):
+        """
+        Link each child to its parent by setting parent_id.
+        """
+        # Build mapping: child_id -> parent_id
+        child_to_parent = {}
+        for parent in parent_chunks:
+            parent_id = parent["chunk_id"]
+            for child_id in parent["child_chunk_ids"]:
+                child_to_parent[child_id] = parent_id
+
+        # Update children with parent_id
+        for child in child_chunks:
+            child_id = child["chunk_id"]
+            child["parent_id"] = child_to_parent.get(child_id)
+
+    def _timestamp_to_seconds(self, timestamp: str) -> float:
+        """Convert HH:MM:SS timestamp to seconds."""
+        try:
+            parts = timestamp.split(":")
+            if len(parts) == 3:
+                h, m, s = parts
+                return float(h) * 3600 + float(m) * 60 + float(s)
+            return 0.0
+        except:
+            return 0.0
+
+    def _extract_topics(self, text: str) -> List[str]:
+        """
+        Simple topic extraction using keyword matching.
+        Returns list of detected topics/keywords.
+        """
+        # Estate planning keywords
+        keywords = {
+            "estate planning", "trust", "will", "power of attorney",
+            "healthcare directive", "beneficiary", "executor", "trustee",
+            "probate", "asset protection", "tax planning", "inheritance",
+            "revocable", "irrevocable", "living trust", "testamentary",
+            "guardianship", "conservatorship", "real estate", "property",
+            "children", "spouse", "family", "divorce", "marriage",
+            "business", "LLC", "corporation", "partnership",
+            "retirement", "IRA", "401k", "pension", "investment",
+            "debt", "creditor", "lawsuit", "medicaid", "nursing home",
+            "price", "cost", "fee", "payment", "deposit", "financing"
+        }
+
+        text_lower = text.lower()
+        detected = []
+
+        for keyword in keywords:
+            if keyword in text_lower:
+                detected.append(keyword)
+
+        return detected[:5]  # Return top 5 topics
+
+    def _phase_to_sales_stage(self, conversation_phase: Optional[str]) -> str:
+        """
+        Map conversation phase to Baserow sales_stage values.
+
+        Baserow sales_stage options:
+        - Setting up for meeting
+        - Assistant Intro Rep
+        - Greeting
+        - Client Motivation
+        - Set Meeting Agenda
+        - Establish Credibility
+        - Discovery
+        - Compare Options
+        - Present Solution
+        - Pricing
+        - Objection Handling
+        - Closing
+        - Unknown
+        """
+        if not conversation_phase:
+            return "Unknown"
+
+        phase_lower = conversation_phase.lower()
+
+        # Exact matches first
+        if "setting up" in phase_lower or "pre-meeting" in phase_lower:
+            return "Setting up for meeting"
+        if "assistant intro" in phase_lower or "rep intro" in phase_lower:
+            return "Assistant Intro Rep"
+        if "greeting" in phase_lower or "hello" in phase_lower or "introduction" in phase_lower:
+            return "Greeting"
+        if "motivation" in phase_lower or "why" in phase_lower:
+            return "Client Motivation"
+        if "agenda" in phase_lower or "plan" in phase_lower:
+            return "Set Meeting Agenda"
+        if "credibility" in phase_lower or "about us" in phase_lower or "experience" in phase_lower:
+            return "Establish Credibility"
+        if "discovery" in phase_lower or "needs" in phase_lower or "goals" in phase_lower or "estate details" in phase_lower:
+            return "Discovery"
+        if "compare" in phase_lower or "options" in phase_lower or "competition" in phase_lower:
+            return "Compare Options"
+        if "present" in phase_lower or "solution" in phase_lower or "structure" in phase_lower or "benefits" in phase_lower:
+            return "Present Solution"
+        if "pric" in phase_lower or "cost" in phase_lower or "fee" in phase_lower or "money" in phase_lower:
+            return "Pricing"
+        if "objection" in phase_lower or "rebuttal" in phase_lower or "concern" in phase_lower:
+            return "Objection Handling"
+        if "closing" in phase_lower or "close" in phase_lower or "ending" in phase_lower or "scheduling" in phase_lower:
+            return "Closing"
+
+        return "Unknown"

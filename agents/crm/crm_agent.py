@@ -166,15 +166,15 @@ class CRMAgent(BaseAgent):
             "real_estate_count": enhanced_extraction.get("real_estate_count", 0),
             "llc_interest": enhanced_extraction.get("llc_interest", ""),
 
-            # === FINANCIAL DATA ===
-            "deal": enhanced_extraction.get("deal_amount", 0),
-            "deposit": enhanced_extraction.get("deposit_amount", 0),
-
-            # === SALES DATA ===
+            # === SALES DATA === (Determine outcome FIRST for validation)
             "product_discussed": self._extract_products_discussed(extracted_data, enhanced_extraction),
-            "objections_raised": self._consolidate_objections(extracted_data),
+            "objections_raised": self._consolidate_objections(extracted_data, enhanced_extraction),
             "outcome": self._determine_outcome(extracted_data, enhanced_extraction),
             "action_items": self._extract_next_steps(extracted_data, email_draft),
+
+            # === FINANCIAL DATA === (CRITICAL: Set to $0 if outcome != Won)
+            "deal": self._validate_deal_amount(enhanced_extraction, self._determine_outcome(extracted_data, enhanced_extraction)),
+            "deposit": self._validate_deposit_amount(enhanced_extraction, self._determine_outcome(extracted_data, enhanced_extraction)),
 
             # === DEAL TRACKING (NEW) ===
             # Set close_date to meeting_date if deal is Won
@@ -376,6 +376,7 @@ class CRMAgent(BaseAgent):
            - marital_status (Single/Married/Divorced/Widowed/Separated)
            - children_count (number)
            - client_email (email address)
+           - client_phone (phone number - ONLY extract actual phone numbers in format XXX-XXX-XXXX, do NOT extract numbers from timeline discussions like "3 days" or "5 business days")
 
         2. Estate information:
            - estate_value (estimated total value in dollars, number only)
@@ -392,18 +393,44 @@ class CRMAgent(BaseAgent):
            - Payment plan discussions, credit card processing
            - Look for patterns like "$X,XXX" or "X thousand" or "X hundred"
 
-        4. Meeting outcome (CRITICAL - Detect deal closure):
+        4. Objections (CRITICAL - What's blocking the sale?):
+           - objections_raised (single word describing PRIMARY objection)
+
+           **OBJECTION DETECTION RULES**:
+           Look for phrases that indicate what's blocking the sale:
+           - "Spouse" = needs to discuss with spouse/wife/husband/partner
+           - "Price" = too expensive, cost concerns, affordability issues
+           - "Time" = need to think about it, not ready yet
+           - "Authority" = need to talk to someone else (not spouse)
+           - "None" = no objections raised, ready to proceed
+
+           Examples:
+           - "I need to discuss this with my wife" → "Spouse"
+           - "Let me talk to my husband about it" → "Spouse"
+           - "That's more than I expected to pay" → "Price"
+           - "I need some time to think" → "Time"
+
+        5. Meeting outcome (CRITICAL - ONLY mark Won if payment processed):
            - summary (brief meeting summary)
-           - outcome_indication (Won/Lost/Pending)
+           - outcome_indication (Won/Lost/Follow-up Scheduled/Pending)
+           - payment_processed (boolean - did client provide credit card/payment details?)
 
-           Mark as "Won" if you see:
-           - Client agrees to move forward ("I'm ready", "let's do it", "moving forward")
-           - Payment/credit card processing happens
-           - Deposit or deal amount mentioned with agreement
-           - Next steps scheduled with commitment language
+           **STRICT RULES FOR OUTCOME**:
 
-           Mark as "Lost" if client explicitly declines
-           Mark as "Pending" if unclear or still considering
+           Mark as "Won" ONLY IF ALL of these are true:
+           - Client provides credit card number, security code, billing zip code
+           - Payment is actually processed in the closing section (usually last 5-10 minutes)
+           - Look for phrases like: "card number", "security code", "CVV", "zip code", "expiration date"
+           - Explicit confirmation of payment processing
+
+           Mark as "Follow-up Scheduled" if:
+           - Client needs to "discuss with spouse"
+           - Client needs to "think about it"
+           - Client says "I'll get back to you"
+           - No payment information provided
+
+           Mark as "Lost" if client explicitly declines or says not interested
+           Mark as "Pending" if outcome is unclear
 
         Respond ONLY in JSON format:
         {{
@@ -411,13 +438,34 @@ class CRMAgent(BaseAgent):
             "marital_status": "Married",
             "children_count": 2,
             "client_email": "client@example.com",
+            "client_phone": "555-123-4567",
             "estate_value": 500000,
             "real_estate_count": 1,
             "llc_interest": "Tech startup LLC",
+            "objections_raised": "None",
             "deal_amount": 3200,
             "deposit_amount": 700,
-            "summary": "Discussion about estate planning needs",
+            "payment_processed": true,
+            "summary": "Discussion about estate planning needs, payment processed",
             "outcome_indication": "Won"
+        }}
+
+        Example for NO payment (Follow-up with Spouse objection):
+        {{
+            "client_name": "Jane Smith",
+            "marital_status": "Married",
+            "children_count": 1,
+            "client_email": "jane@example.com",
+            "client_phone": "555-987-6543",
+            "estate_value": 0,
+            "real_estate_count": 0,
+            "llc_interest": "",
+            "objections_raised": "Spouse",
+            "deal_amount": 0,
+            "deposit_amount": 0,
+            "payment_processed": false,
+            "summary": "Needs to discuss with spouse before proceeding",
+            "outcome_indication": "Follow-up Scheduled"
         }}
         """
 
@@ -506,11 +554,21 @@ class CRMAgent(BaseAgent):
 
         return ", ".join(products) if products else "Estate Planning"
 
-    def _consolidate_objections(self, extracted_data: Dict[str, Any]) -> str:
-        """Consolidate all objections raised during the meeting"""
+    def _consolidate_objections(self, extracted_data: Dict[str, Any], enhanced_data: Dict[str, Any] = None) -> str:
+        """
+        Consolidate all objections raised during the meeting.
+
+        Priority: LLM-extracted objections > legacy extracted_data
+        """
+        enhanced_data = enhanced_data or {}
         objections = []
 
-        # Main objection
+        # PRIORITY 1: LLM-extracted objection (most accurate)
+        llm_objection = enhanced_data.get("objections_raised", "")
+        if llm_objection and llm_objection.lower() not in ["none", "not_found", ""]:
+            return llm_objection
+
+        # FALLBACK: Legacy objections from extracted_data
         main_objection = extracted_data.get("main_objection", "")
         if main_objection and "not found" not in main_objection.lower():
             objections.append(main_objection)
@@ -525,19 +583,33 @@ class CRMAgent(BaseAgent):
         return "; ".join(objections) if objections else ""
 
     def _determine_outcome(self, extracted_data: Dict[str, Any], enhanced_data: Dict[str, Any]) -> str:
-        """Determine meeting outcome based on available data"""
-        # Check enhanced extraction first
+        """
+        Determine meeting outcome based on PAYMENT PROCESSING.
+
+        STRICT RULE: "Won" ONLY if payment was processed (credit card details provided).
+        """
+        # Check if payment was actually processed
+        payment_processed = enhanced_data.get("payment_processed", False)
+
+        # VALIDATION: Won REQUIRES payment processing
         outcome_indication = enhanced_data.get("outcome_indication", "")
+
+        if outcome_indication == "Won":
+            # Double-check: Won requires payment_processed = true
+            if not payment_processed:
+                print(f"   ⚠️ VALIDATION: Outcome was 'Won' but no payment processed. Changing to 'Follow-up Scheduled'")
+                return "Follow-up Scheduled"
+            return "Won"
+
+        # If outcome is explicitly in valid choices, use it
         if outcome_indication in self.outcome_choices:
             return outcome_indication
 
-        # Check for outcome indicators in extracted data
+        # Fallback: Check for outcome indicators in extracted data
         next_steps = str(extracted_data.get("next_steps", "")).lower()
-        if any(indicator in next_steps for indicator in ["signed", "contract", "agreement", "closed"]):
-            return "Won"
-        elif any(indicator in next_steps for indicator in ["not interested", "declined", "passed"]):
+        if any(indicator in next_steps for indicator in ["not interested", "declined", "passed"]):
             return "Lost"
-        elif any(indicator in next_steps for indicator in ["follow up", "schedule", "think about"]):
+        elif any(indicator in next_steps for indicator in ["follow up", "schedule", "think about", "discuss with spouse"]):
             return "Follow-up Scheduled"
         else:
             return "Pending"
@@ -552,6 +624,36 @@ class CRMAgent(BaseAgent):
             "Needs More Info": 0.4
         }
         return probability_map.get(outcome, 0.5)
+
+    def _validate_deal_amount(self, enhanced_data: Dict[str, Any], outcome: str) -> float:
+        """
+        Validate deal amount: ONLY non-zero if outcome = Won.
+
+        STRICT RULE: If deal not closed (outcome != Won), deal amount MUST be $0.
+        """
+        deal_amount = enhanced_data.get("deal_amount", 0)
+
+        if outcome != "Won":
+            if deal_amount > 0:
+                print(f"   ⚠️ VALIDATION: Outcome='{outcome}' but deal_amount=${deal_amount}. Setting to $0.")
+            return 0.0
+
+        return float(deal_amount)
+
+    def _validate_deposit_amount(self, enhanced_data: Dict[str, Any], outcome: str) -> float:
+        """
+        Validate deposit amount: ONLY non-zero if outcome = Won.
+
+        STRICT RULE: If deal not closed (outcome != Won), deposit MUST be $0.
+        """
+        deposit_amount = enhanced_data.get("deposit_amount", 0)
+
+        if outcome != "Won":
+            if deposit_amount > 0:
+                print(f"   ⚠️ VALIDATION: Outcome='{outcome}' but deposit_amount=${deposit_amount}. Setting to $0.")
+            return 0.0
+
+        return float(deposit_amount)
 
     def _extract_next_steps(self, extracted_data: Dict[str, Any], email_draft: str) -> str:
         """Extract and consolidate next steps"""

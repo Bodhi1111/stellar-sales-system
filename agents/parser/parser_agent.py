@@ -87,14 +87,15 @@ class ParserAgent(BaseAgent):
 
     def _extract_header_metadata(self, raw_text: str) -> Dict[str, Any]:
         """
-        Extract all metadata from header section (first 14 lines).
-        Handles TWO patterns:
-        
+        Extract all metadata from header section (first 20 lines).
+        Handles THREE patterns:
+
         PATTERN A (George Padron): Line 1=title, Line 2=name, Line 4=email, Line 6=date, Line 8=id, Line 10=url, Line 12=duration
-        PATTERN B (Robin Michalek): Line 1=title, Line 3=name, Line 5=email, Line 7=date, Line 9=id, Line 11=url, Line 13=duration
+        PATTERN B (Robin Michalek - single blank): Line 1=title, Line 3=name, Line 5=email, Line 7=date, Line 9=id, Line 11=url, Line 13=duration
+        PATTERN C (Yongsik Johng - double blank): Line 1=title, Line 4=url, Line 7=date, Line 10=duration, Line 13=name, Line 16=email
         """
-        lines = raw_text.split('\n')[:14]  # First 14 lines (0-13 indexed)
-        
+        lines = raw_text.split('\n')[:20]  # First 20 lines to accommodate double-blank pattern
+
         metadata = {
             'meeting_title': None,
             'client_name': None,
@@ -105,26 +106,31 @@ class ParserAgent(BaseAgent):
             'meeting_url': None,
             'duration_minutes': None
         }
-        
+
         # Line 1 (index 0) = meeting title (always present)
         if len(lines) > 0:
             metadata['meeting_title'] = lines[0].strip()
-        
-        # Detect pattern by checking if Line 2 is blank (Pattern B) or has content (Pattern A)
+
+        # Detect pattern by checking blank line positions
+        # Pattern A: Line 2 has content
+        # Pattern B: Line 2 blank, Line 3 has content (single blank spacing)
+        # Pattern C: Lines 2-3 blank, Line 4 has URL (double blank spacing)
         is_pattern_a = len(lines) > 1 and lines[1].strip() != ""
+        is_pattern_c = (len(lines) > 3 and lines[1].strip() == "" and
+                       lines[2].strip() == "" and 'http' in lines[3])
         
         if is_pattern_a:
             # PATTERN A: George Padron style (no blank after title)
             print("   📋 Detected Pattern A: George Padron style")
-            
+
             # Line 2 (index 1) = client name
             if len(lines) > 1:
                 metadata['client_name'] = lines[1].strip()
-            
+
             # Line 4 (index 3) = email
             if len(lines) > 3 and '@' in lines[3]:
                 metadata['client_email'] = lines[3].strip()
-            
+
             # Line 6 (index 5) = date AND time
             if len(lines) > 5:
                 date_match = re.search(r'(\d{4}-\d{2}-\d{2})', lines[5])
@@ -133,35 +139,31 @@ class ParserAgent(BaseAgent):
                 time_match = re.search(r'T(\d{2}:\d{2}:\d{2})', lines[5])
                 if time_match:
                     metadata['meeting_time'] = time_match.group(1)
-            
+
             # Line 8 (index 7) = transcript_id
             if len(lines) > 7:
                 id_match = re.search(r'(\d+\.?\d*)', lines[7])
                 if id_match:
                     metadata['transcript_id'] = id_match.group(1)
-            
+
             # Line 10 (index 9) = meeting URL
             if len(lines) > 9 and 'http' in lines[9]:
                 metadata['meeting_url'] = lines[9].strip()
-            
+
             # Line 12 (index 11) = duration
             if len(lines) > 11:
                 duration_match = re.search(r'(\d+\.?\d*)', lines[11])
                 if duration_match:
                     metadata['duration_minutes'] = float(duration_match.group(1))
-        
-        else:
-            # PATTERN B: Robin Michalek style (blank line after title)
-            print("   📋 Detected Pattern B: Robin Michalek style")
-            
-            # Line 3 (index 2) = client name
-            if len(lines) > 2:
-                metadata['client_name'] = lines[2].strip()
-            
-            # Line 5 (index 4) = email
-            if len(lines) > 4 and '@' in lines[4]:
-                metadata['client_email'] = lines[4].strip()
-            
+
+        elif is_pattern_c:
+            # PATTERN C: Yongsik Johng style (double blank lines)
+            print("   📋 Detected Pattern C: Yongsik Johng style (double blank spacing)")
+
+            # Line 4 (index 3) = meeting URL
+            if len(lines) > 3 and 'http' in lines[3]:
+                metadata['meeting_url'] = lines[3].strip()
+
             # Line 7 (index 6) = date AND time
             if len(lines) > 6:
                 date_match = re.search(r'(\d{4}-\d{2}-\d{2})', lines[6])
@@ -170,23 +172,62 @@ class ParserAgent(BaseAgent):
                 time_match = re.search(r'T(\d{2}:\d{2}:\d{2})', lines[6])
                 if time_match:
                     metadata['meeting_time'] = time_match.group(1)
-            
-            # Line 9 (index 8) = transcript_id
-            if len(lines) > 8:
-                id_match = re.search(r'(\d+\.?\d*)', lines[8])
+
+            # Line 10 (index 9) = duration
+            if len(lines) > 9:
+                duration_match = re.search(r'(\d+\.?\d*)', lines[9])
+                if duration_match:
+                    metadata['duration_minutes'] = float(duration_match.group(1))
+
+            # Line 13 (index 12) = client name
+            if len(lines) > 12:
+                metadata['client_name'] = lines[12].strip()
+
+            # Line 16 (index 15) = email
+            if len(lines) > 15 and '@' in lines[15]:
+                metadata['client_email'] = lines[15].strip()
+
+            # NOTE: Pattern C does NOT have transcript_id in header
+            # Will be generated from filename hash
+
+        else:
+            # PATTERN B: Robin Michalek style (single blank line after title)
+            print("   📋 Detected Pattern B: Robin Michalek style")
+
+            # Line 3 (index 2) = client name
+            if len(lines) > 2:
+                metadata['client_name'] = lines[2].strip()
+
+            # Line 5 (index 4) = email
+            if len(lines) > 4 and '@' in lines[4]:
+                metadata['client_email'] = lines[4].strip()
+
+            # Line 7 (index 6) = date AND time
+            if len(lines) > 6:
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', lines[6])
+                if date_match:
+                    metadata['meeting_date'] = date_match.group(1)
+                time_match = re.search(r'T(\d{2}:\d{2}:\d{2})', lines[6])
+                if time_match:
+                    metadata['meeting_time'] = time_match.group(1)
+
+            # Line 9 (index 8) = transcript_id (8-9 digit number, NO decimal)
+            if len(lines) > 8 and lines[8].strip():
+                # transcript_id should be pure digits (e.g., 56726121), not duration
+                id_match = re.match(r'^(\d{7,10})$', lines[8].strip())
                 if id_match:
                     metadata['transcript_id'] = id_match.group(1)
-            
+
             # Line 11 (index 10) = meeting URL
             if len(lines) > 10 and 'http' in lines[10]:
                 metadata['meeting_url'] = lines[10].strip()
-            
+
             # Line 13 (index 12) = duration
             if len(lines) > 12:
                 duration_match = re.search(r'(\d+\.?\d*)', lines[12])
                 if duration_match:
                     metadata['duration_minutes'] = float(duration_match.group(1))
-        
+
         return metadata
 
     def _extract_transcript_id(self, content: str) -> str:

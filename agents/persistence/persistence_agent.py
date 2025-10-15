@@ -1,6 +1,7 @@
 from typing import Dict, Any
 from pathlib import Path
 from sqlalchemy.dialects.postgresql import insert
+import asyncio
 
 from agents.base_agent import BaseAgent
 from config.settings import Settings
@@ -90,25 +91,56 @@ class PersistenceAgent(BaseAgent):
             print(
                 f"   ✅ Successfully saved final record to PostgreSQL for transcript ID {transcript_id}.")
 
-            # Sync to Baserow (non-blocking - don't fail the whole pipeline if Baserow fails)
-            try:
-                crm_data = data.get("crm_data", {})
-                if crm_data:
-                    baserow_result = await self.baserow_manager.sync_crm_data(crm_data, transcript_id)
-                    if baserow_result.get("status") == "success":
-                        print(
-                            f"   ✅ Successfully synced to Baserow for transcript ID {transcript_id}.")
-                    else:
-                        print(
-                            f"   ⚠️ Baserow sync failed: {baserow_result.get('error')}")
-                else:
-                    print(f"   ⚠️ No CRM data to sync to Baserow.")
-            except Exception as baserow_error:
-                print(
-                    f"   ⚠️ Baserow sync failed (non-critical): {baserow_error}")
+            # Launch Baserow sync in background (fire-and-forget, non-blocking)
+            print(f"   🚀 Launching Baserow sync in background (non-blocking)...")
+            asyncio.create_task(
+                self._sync_to_baserow_background(data, transcript_id, file_path)
+            )
 
             return {"persistence_status": "success"}
 
         except Exception as e:
             print(f"   ❌ ERROR in PersistenceAgent: {type(e).__name__}: {e}")
             return {"persistence_status": "error", "message": str(e)}
+
+    async def _sync_to_baserow_background(self, data: Dict[str, Any], transcript_id: str, file_path: Path):
+        """
+        Background task for Baserow sync (fire-and-forget).
+        Runs asynchronously without blocking the main pipeline.
+        """
+        try:
+            # 1. Sync CRM data (clients, meetings, deals, etc.)
+            crm_data = data.get("crm_data", {})
+            if crm_data:
+                baserow_result = await self.baserow_manager.sync_crm_data(crm_data, transcript_id)
+                if baserow_result.get("status") == "success":
+                    print(
+                        f"   ✅ [Background] Successfully synced CRM data to Baserow for transcript ID {transcript_id}.")
+                else:
+                    print(
+                        f"   ⚠️ [Background] Baserow CRM sync failed: {baserow_result.get('error')}")
+            else:
+                print(f"   ⚠️ [Background] No CRM data to sync to Baserow.")
+
+            # 2. Sync Chunks (NEW: Parent-Child architecture)
+            chunks_data = data.get("chunks_data", {})
+            all_chunks = chunks_data.get("all_chunks", [])
+            if all_chunks and file_path:
+                chunks_result = await self.baserow_manager.sync_chunks(
+                    chunks=all_chunks,
+                    transcript_id=transcript_id,
+                    transcript_filename=file_path.name
+                )
+                if chunks_result.get("status") == "success":
+                    chunk_count = chunks_result.get("synced_count", 0)
+                    print(
+                        f"   ✅ [Background] Successfully synced {chunk_count} chunks to Baserow for transcript ID {transcript_id}.")
+                else:
+                    print(
+                        f"   ⚠️ [Background] Baserow chunks sync failed: {chunks_result.get('error')}")
+            else:
+                print(f"   ⚠️ [Background] No chunks data to sync to Baserow.")
+
+        except Exception as baserow_error:
+            print(
+                f"   ⚠️ [Background] Baserow sync failed (non-critical): {baserow_error}")

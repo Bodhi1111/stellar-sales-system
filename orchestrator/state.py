@@ -14,8 +14,9 @@ class AgentState(TypedDict):
     # --- Universal Fields ---
     file_path: Optional[Path]
     transcript_id: Optional[str]  # Changed from int to str to match header ID
-    chunks: Optional[List[str]]
-    
+    chunks: Optional[List[str]]  # DEPRECATED: Use chunks_data instead
+    chunks_data: Optional[Dict[str, Any]]  # NEW: Parent-child chunks (all_chunks, child_chunks, parent_chunks, header_chunk)
+
     # --- Header Metadata (NEW) ---
     header_metadata: Optional[Dict[str, Any]]  # Contains client_name, email, date, etc.
 

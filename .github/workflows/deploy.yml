@@ -1,0 +1,91 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ github.event.inputs.environment || 'staging' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure deployment environment
+        run: |
+          echo "Deploying to ${{ github.event.inputs.environment || 'staging' }}"
+          echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+
+      # Example: Deploy to a Kubernetes cluster
+      # Uncomment and configure when you have a K8s cluster
+      # - name: Install kubectl
+      #   uses: azure/setup-kubectl@v3
+      
+      # - name: Set up kubeconfig
+      #   run: |
+      #     mkdir -p ~/.kube
+      #     echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+      
+      # - name: Deploy to Kubernetes
+      #   run: |
+      #     kubectl set image deployment/stellar-sales-system \
+      #       app=ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }} \
+      #       -n stellar-sales
+
+      # Example: Deploy using Docker Compose on a remote server
+      # Uncomment and configure for your server
+      # - name: Deploy to server via SSH
+      #   uses: appleboy/ssh-action@v1.0.0
+      #   with:
+      #     host: ${{ secrets.SERVER_HOST }}
+      #     username: ${{ secrets.SERVER_USER }}
+      #     key: ${{ secrets.SSH_PRIVATE_KEY }}
+      #     script: |
+      #       cd /opt/stellar-sales-system
+      #       git pull origin main
+      #       docker-compose pull
+      #       docker-compose up -d --force-recreate
+
+      # Example: Deploy to AWS ECS
+      # Uncomment when you have AWS configured
+      # - name: Configure AWS credentials
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: us-east-1
+      
+      # - name: Deploy to ECS
+      #   run: |
+      #     aws ecs update-service \
+      #       --cluster stellar-sales-cluster \
+      #       --service stellar-sales-service \
+      #       --force-new-deployment
+
+      # Placeholder deployment step - replace with your actual deployment method
+      - name: Deployment placeholder
+        run: |
+          echo "🚀 Deployment triggered for ${{ github.event.inputs.environment || 'staging' }}"
+          echo "📦 Image: ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          echo ""
+          echo "Configure your actual deployment by uncommenting one of the example methods above"
+          echo "or add your custom deployment script here."
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          echo "Deployment completed with status: ${{ job.status }}"
+          # Add Slack/Discord/Email notification here if needed

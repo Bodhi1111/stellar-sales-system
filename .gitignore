@@ -1,15 +1,60 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
 venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
 .env
+.env.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+profile.out
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+*.log
 
 # Data & Logs
 data/logs/
 data/processed/
 data/exports/
+data/transcripts/
+data/postgres/
+data/neo4j/
+data/qdrant/
 
-# IDE files
+# IDEs
 .vscode/
 .idea/
-data/transcripts/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archive
+.archive/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

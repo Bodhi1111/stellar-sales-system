@@ -52,8 +52,9 @@ Replanner (if low confidence) ← (decision logic)
 
 ### Database Architecture
 - **PostgreSQL**: Primary relational database for structured data
-- **Qdrant**: Vector database for embeddings and semantic search
-- **Neo4j**: Graph database for relationship mapping and knowledge graphs
+- **Qdrant**: Vector database for embeddings and semantic search (BAAI/bge-base-en-v1.5, 768 dimensions)
+- **Baserow**: CRM interface for human-friendly data management
+- **Neo4j**: ~~Graph database~~ (DISABLED - not used in current pipeline)
 
 ### Key Components
 - **Agent State** (`orchestrator/state.py`): TypedDict carrying data through the graph pipeline
@@ -67,7 +68,7 @@ Replanner (if low confidence) ← (decision logic)
 # Create virtual environment and install dependencies
 make install
 
-# Start all database services (PostgreSQL, Qdrant, Neo4j, Ollama)
+# Start all database services (PostgreSQL, Qdrant, Ollama, Baserow)
 make docker-up
 
 # Stop all services
@@ -90,8 +91,9 @@ make run-api
 # Access services:
 # - PostgreSQL: localhost:5432
 # - Qdrant UI: http://localhost:6333/dashboard
-# - Neo4j Browser: http://localhost:7474
+# - Baserow UI: http://localhost:8080
 # - Ollama API: http://localhost:11434
+# - Neo4j Browser: ~~http://localhost:7474~~ (DISABLED)
 ```
 
 ### Testing Workflows
@@ -123,12 +125,12 @@ To add a new agent:
 
 Environment variables (`.env`):
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`: PostgreSQL credentials
-- **LLM configuration**: Ollama with **DeepSeek-Coder 33B Instruct** model
-  - Model size: 18.8GB
-  - Optimized for structured data extraction and JSON generation
-  - Average inference time: 30-60s per request
-  - Configured in `config/settings.py`: `LLM_MODEL_NAME = "deepseek-coder:33b-instruct"`
-- Neo4j and Qdrant use default local settings
+- **LLM configuration**: Ollama with **Mistral 7B** model
+  - Model size: 4.1GB
+  - Fast inference for structured data extraction and JSON generation
+  - Average inference time: 10-20s per request
+  - Configured in `.env`: `LLM_MODEL_NAME=mistral:7b`
+- Qdrant and Baserow use default local settings
 
 ### LLM Client
 All agents use the centralized `core/llm_client.py` which provides:

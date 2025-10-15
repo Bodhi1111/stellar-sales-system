@@ -19,10 +19,10 @@ class Settings(BaseSettings):
     # Embedding Model Settings
     EMBEDDING_MODEL_NAME: str
 
-    # Neo4j Settings
-    NEO4J_URL: str
-    NEO4J_USER: str
-    NEO4J_PASSWORD: str
+    # Neo4j Settings (DISABLED - not used in current pipeline)
+    # NEO4J_URL: str
+    # NEO4J_USER: str
+    # NEO4J_PASSWORD: str
 
     # Baserow Settings
     BASEROW_URL: str
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     BASEROW_DEALS_ID: int
     BASEROW_COMMUNICATIONS_ID: int
     BASEROW_SALES_COACHING_ID: int
+    BASEROW_CHUNKS_ID: int  # Parent-child chunk metadata table
 
     # Computed Properties (derived from file location, not from .env)
     @property

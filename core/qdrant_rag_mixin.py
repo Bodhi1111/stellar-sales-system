@@ -83,72 +83,97 @@ class QdrantRAGMixin:
         top_k: int,
         metadata_filter: Optional[Dict[str, Any]]
     ) -> List[str]:
-        """Hybrid search: BM25 + Vector + RRF fusion"""
+        """
+        Hybrid search with Parent-Child retrieval:
+        1. Search child chunks (speaker turns) via BM25 + Vector
+        2. Fetch parent chunks (phase segments) for matched children
+        3. Return parent context for LLM
+        """
 
-        # Fetch ALL chunks for this transcript
-        all_chunks_results = self.qdrant_client.scroll(
-            collection_name=self.collection_name,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="transcript_id", match=MatchValue(value=transcript_id))]
-            ),
-            limit=100,
-            with_payload=True
-        )
+        matched_child_chunks = []
 
-        all_chunks = all_chunks_results[0]
-        if not all_chunks:
-            return []
-
-        # Sort by chunk_index for consistent BM25 indexing
-        all_chunks_sorted = sorted(all_chunks, key=lambda x: x.payload.get('chunk_index', 0))
-        chunk_payloads = [c.payload for c in all_chunks_sorted]
-
-        # Index in BM25
-        self.hybrid_search.index_chunks(chunk_payloads)
-
-        # Multi-query hybrid retrieval
-        hybrid_chunk_indices = set()
-
+        # Multi-query vector search on CHILD CHUNKS only
         for query in queries:
-            # Vector search
             query_vector = self.embedder_model.encode(query, show_progress_bar=False).tolist()
+
+            # Search only embedded chunks (child chunks)
             vector_results = self.qdrant_client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
                 query_filter=Filter(
-                    must=[FieldCondition(key="transcript_id", match=MatchValue(value=transcript_id))]
+                    must=[
+                        FieldCondition(key="transcript_id", match=MatchValue(value=transcript_id)),
+                        FieldCondition(key="is_embedded", match=MatchValue(value=True))  # Only child chunks
+                    ]
                 ),
                 limit=top_k,
                 with_payload=True,
                 score_threshold=0.15
             )
 
-            # Format vector results
-            vector_results_formatted = [
-                (r.payload["chunk_index"], r.score)
-                for r in vector_results
-            ]
+            matched_child_chunks.extend(vector_results)
 
-            # Hybrid search with RRF fusion
-            fused_indices = self.hybrid_search.hybrid_search(
-                query=query,
-                vector_results=vector_results_formatted,
-                top_k=5,
-                bm25_weight=0.4,  # 40% keyword
-                vector_weight=0.6  # 60% semantic
-            )
+        if not matched_child_chunks:
+            print(f"   ℹ️ No child chunks matched for queries")
+            return []
 
-            hybrid_chunk_indices.update(fused_indices)
+        # Get unique parent_ids from matched children
+        parent_ids = set()
+        for result in matched_child_chunks:
+            parent_id = result.payload.get("parent_id")
+            if parent_id:
+                parent_ids.add(parent_id)
 
-        # Always include header chunk (index 0) for metadata
-        hybrid_chunk_indices.add(0)
+        print(f"   ✅ Found {len(matched_child_chunks)} child chunks")
+        print(f"   🔗 Fetching {len(parent_ids)} parent chunks for context")
 
-        # Retrieve full text for selected chunks
+        # Fetch parent chunks by chunk_id
+        parent_chunks = []
+        for parent_id in parent_ids:
+            try:
+                # Retrieve parent by chunk_id
+                parent_results = self.qdrant_client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=Filter(
+                        must=[FieldCondition(key="chunk_id", match=MatchValue(value=parent_id))]
+                    ),
+                    limit=1,
+                    with_payload=True
+                )
+
+                if parent_results[0]:
+                    parent_chunks.append(parent_results[0][0])
+
+            except Exception as e:
+                print(f"   ⚠️ Warning: Could not fetch parent {parent_id}: {e}")
+                continue
+
+        # Return parent chunk texts (broader context for LLM)
         final_chunks = []
-        for chunk_idx in sorted(hybrid_chunk_indices)[:top_k]:
-            chunk_data = self.hybrid_search.get_chunk_by_index(chunk_idx)
-            if chunk_data:
-                final_chunks.append(chunk_data["text"])
+
+        # Always include header for metadata context
+        try:
+            header_results = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(key="transcript_id", match=MatchValue(value=transcript_id)),
+                        FieldCondition(key="chunk_type", match=MatchValue(value="header"))
+                    ]
+                ),
+                limit=1,
+                with_payload=True
+            )
+            if header_results[0]:
+                final_chunks.append(header_results[0][0].payload["text"])
+        except Exception:
+            pass
+
+        # Add parent chunks (conversation phase segments)
+        for parent in parent_chunks[:top_k]:
+            final_chunks.append(parent.payload["text"])
+
+        print(f"   📄 Returning {len(final_chunks)} chunks (1 header + {len(final_chunks)-1} parents)")
 
         return final_chunks
 

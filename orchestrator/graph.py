@@ -2,6 +2,7 @@ from agents.sales_copilot.sales_copilot_agent import SalesCopilotAgent as RealSa
 from langgraph.graph import StateGraph, END
 from typing import Dict, Any
 import re
+from pathlib import Path
 
 from orchestrator.state import AgentState
 from config.settings import settings
@@ -14,7 +15,8 @@ from agents.chunker.chunker import ChunkerAgent
 
 # Intelligence Core Agents
 from agents.embedder.embedder_agent import EmbedderAgent
-from agents.knowledge_analyst.knowledge_analyst_agent import KnowledgeAnalystAgent
+# REMOVED: KnowledgeAnalystAgent (Neo4j graph population - not used in pipeline)
+# from agents.knowledge_analyst.knowledge_analyst_agent import KnowledgeAnalystAgent
 
 # Legacy Downstream Agents (for compatibility)
 from agents.email.email_agent import EmailAgent
@@ -36,7 +38,7 @@ parser_agent = ParserAgent(settings)
 structuring_agent = StructuringAgent(settings)
 chunker_agent = ChunkerAgent(settings)
 embedder_agent = EmbedderAgent(settings)
-knowledge_analyst_agent = KnowledgeAnalystAgent(settings)
+# REMOVED: knowledge_analyst_agent = KnowledgeAnalystAgent(settings)
 email_agent = EmailAgent(settings)
 social_agent = SocialAgent(settings)
 sales_coach_agent = SalesCoachAgent(settings)
@@ -71,7 +73,8 @@ async def structuring_node(state: AgentState) -> Dict[str, Any]:
     Extracts: phases, entities, topics, intent, sentiment, discourse markers
     """
     # Read raw transcript
-    content = state["file_path"].read_text(encoding='utf-8')
+    file_path = Path(state["file_path"])
+    content = file_path.read_text(encoding='utf-8')
 
     # Enable semantic NLP analysis (use_semantic_nlp=True)
     result = await structuring_agent.run(
@@ -99,7 +102,7 @@ async def parser_node(state: AgentState) -> Dict[str, Any]:
     Receives phases + semantic_turns from StructuringAgent NLP analysis
     """
     result = await parser_agent.run(
-        file_path=state["file_path"],
+        file_path=Path(state["file_path"]),
         conversation_phases=state.get("conversation_phases"),
         semantic_turns=state.get("semantic_turns")  # ← NLP semantic metadata
     )
@@ -116,49 +119,72 @@ async def parser_node(state: AgentState) -> Dict[str, Any]:
 
 async def chunker_node(state: AgentState) -> Dict[str, Any]:
     """
-    Segment content with RICH metadata preservation
-    Receives enriched dialogue from ParserAgent
+    Create parent-child chunk hierarchy with UUIDs and rich metadata.
+
+    Returns:
+        - chunks_data: Dict with all_chunks, child_chunks, parent_chunks, header_chunk
+        - chunks: (deprecated) List for backward compatibility with legacy agents
     """
-    chunks = await chunker_agent.run(
-        file_path=state["file_path"],
-        structured_dialogue=state.get("structured_dialogue")
+    chunks_data = await chunker_agent.run(
+        file_path=Path(state["file_path"]),
+        structured_dialogue=state.get("structured_dialogue"),
+        transcript_id=state.get("transcript_id"),
+        conversation_phases=state.get("conversation_phases")
     )
-    return {"chunks": chunks}
 
+    # Backward compatibility: Extract child chunks as flat list of dicts for legacy agents
+    legacy_chunks = chunks_data.get("child_chunks", [])
 
-async def knowledge_analyst_node(state: AgentState) -> Dict[str, Any]:
-    """Extract entities from Qdrant vectors and build knowledge graph (RAG-based)"""
-    result = await knowledge_analyst_agent.run(
-        transcript_id=state["transcript_id"],
-        file_path=state["file_path"],
-        chunks=state.get("chunks"),
-        header_metadata=state.get("header_metadata")  # NEW: Pass header metadata
-    )
-    # Populate both new and legacy fields for compatibility
     return {
-        "extracted_entities": result.get("extracted_entities"),
-        # For backward compatibility
-        "extracted_data": result.get("extracted_entities")
+        "chunks_data": chunks_data,  # NEW: Parent-child hierarchy
+        "chunks": legacy_chunks      # DEPRECATED: For backward compatibility
     }
 
 
+# REMOVED: knowledge_analyst_node - Neo4j graph population disabled
+# This node was causing 44s bottleneck and is not critical for CRM workflow
+# Neo4j graph features can be re-enabled via feature flag if needed
+#
+# async def knowledge_analyst_node(state: AgentState) -> Dict[str, Any]:
+#     """Extract entities from Qdrant vectors and build knowledge graph (RAG-based)"""
+#     result = await knowledge_analyst_agent.run(...)
+#     return {"extracted_entities": result.get("extracted_entities")}
+
+
 async def embedder_node(state: AgentState) -> Dict[str, Any]:
-    """Generate and store embeddings in Qdrant with metadata for filtering"""
+    """
+    Embed child chunks (speaker turns) and store parent chunks in Qdrant.
+
+    Parent-Child Architecture:
+    - CHILD CHUNKS: Embedded and indexed for retrieval
+    - PARENT CHUNKS: Stored in Qdrant payload (no embedding) for context
+    - Both have chunk_id and parent_id for linking
+    """
     if not state.get("transcript_id"):
         print("   - Halting embedder: missing transcript_id.")
         return {}
 
-    # Prepare metadata for embeddings (enables filtering in RAG queries)
-    # Note: extracted_data is not available yet (embedder runs BEFORE knowledge analyst)
-    # We only have conversation_phases from structuring agent at this point
+    chunks_data = state.get("chunks_data", {})
+    child_chunks = chunks_data.get("child_chunks", [])
+    parent_chunks = chunks_data.get("parent_chunks", [])
+    header_chunk = chunks_data.get("header_chunk")
+
+    if not child_chunks:
+        print("   - No child chunks to embed.")
+        return {}
+
+    # Prepare metadata from header
+    header_metadata = state.get("header_metadata", {})
     metadata = {
-        "client_name": "",  # Will be empty at this stage, populated later
-        "meeting_date": "",  # Will be empty at this stage, populated later
+        "client_name": header_metadata.get("client_name", ""),
+        "meeting_date": header_metadata.get("meeting_date", ""),
         "conversation_phases": state.get("conversation_phases", [])
     }
 
     await embedder_agent.run(
-        chunks=state["chunks"],
+        child_chunks=child_chunks,      # NEW: Speaker-turn chunks to embed
+        parent_chunks=parent_chunks,    # NEW: Phase chunks for context storage
+        header_chunk=header_chunk,      # NEW: Header metadata chunk
         transcript_id=state["transcript_id"],
         metadata=metadata
     )
@@ -207,10 +233,11 @@ async def crm_node(state: AgentState) -> Dict[str, Any]:
 
 
 async def persistence_node(state: AgentState) -> Dict[str, Any]:
-    """Save all data to PostgreSQL"""
+    """Save all data to PostgreSQL and sync chunks to Baserow"""
     result = await persistence_agent.run(data={
-        "file_path": state["file_path"],
-        "chunks": state["chunks"],
+        "file_path": Path(state["file_path"]),
+        "chunks": state["chunks"],  # Legacy field for PostgreSQL
+        "chunks_data": state.get("chunks_data"),  # NEW: Parent-child chunks for Baserow
         "crm_data": state["crm_data"],
         "social_content": state["social_content"],
         "email_draft": state["email_draft"],
@@ -322,7 +349,12 @@ async def tool_executor_node(state: AgentState) -> Dict[str, Any]:
         tool_agent = tool_map[tool_name]
         try:
             # All tools conform to the same run(data) signature
-            result = await tool_agent.run(data={"query": tool_input})
+            # Pass transcript_id context if available (for RAG scoping)
+            tool_data = {"query": tool_input}
+            if state.get("transcript_id"):
+                tool_data["transcript_id"] = state["transcript_id"]
+
+            result = await tool_agent.run(data=tool_data)
             new_step = {
                 "tool_name": tool_name,
                 "tool_input": tool_input,

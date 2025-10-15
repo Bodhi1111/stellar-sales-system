@@ -35,6 +35,7 @@ class BaserowManager:
         self.deals_table_id = settings.BASEROW_DEALS_ID
         self.communications_table_id = settings.BASEROW_COMMUNICATIONS_ID
         self.sales_coaching_table_id = settings.BASEROW_SALES_COACHING_ID
+        self.chunks_table_id = settings.BASEROW_CHUNKS_ID  # NEW: Parent-child chunks
 
         # Initialize field name → field ID mappings for all tables
         # This is required because baserow-client needs field IDs (field_6790) not names (external_id)
@@ -47,7 +48,8 @@ class BaserowManager:
             self.communications_table_id)
         self.sales_coaching_field_map = self._get_field_mapping(
             self.sales_coaching_table_id)
-        print(f"   ✅ Field mappings loaded for 5 tables")
+        self.chunks_field_map = self._get_field_mapping(self.chunks_table_id)  # NEW
+        print(f"   ✅ Field mappings loaded for 6 tables")
 
     async def sync_crm_data(self, crm_data: Dict[str, Any], transcript_id: str) -> Dict[str, Any]:
         """
@@ -271,12 +273,20 @@ class BaserowManager:
         client_data = {
             "external_id": external_id,
             "client_name": crm_data.get("client_name", crm_data.get("customer_name", "Unknown")),
-            "email": crm_data.get("client_email", crm_data.get("email", "")),
             "children_count": int(crm_data.get("children_count", 0)),
             "estate_value": int(crm_data.get("estate_value", 0)),
             "real_estate_count": int(crm_data.get("real_estate_count", 0)),
             "crm_json": json.dumps(crm_data, indent=2)
         }
+
+        # Only include email if it has a valid value (Baserow email field rejects empty strings)
+        email = crm_data.get("client_email", crm_data.get("email"))
+        print(f"      📧 DEBUG: Email from CRM: '{email}'")
+        if email and email.strip() and '@' in email:
+            client_data["email"] = email
+            print(f"      ✅ Email will be synced: {email}")
+        else:
+            print(f"      ⚠️ Email validation failed or empty: '{email}'")
 
         # Only include marital_status if it has a valid value (Baserow select fields reject empty strings)
         marital_status = crm_data.get("marital_status", "")
@@ -410,27 +420,40 @@ class BaserowManager:
         close_date_raw = crm_data.get("close_date", "")
         close_date_formatted = ""
         if close_date_raw:
-            close_date_formatted = self._parse_date_to_iso8601(close_date_raw)
+            close_date_iso = self._parse_date_to_iso8601(close_date_raw)
+            # Baserow date field requires YYYY-MM-DD only (no time component)
+            close_date_formatted = close_date_iso.split('T')[0] if close_date_iso else ""
 
         deal_amount = float(crm_data.get("deal", 0))
         deposit_amount = float(crm_data.get("deposit", 0))
 
         print(f"      💵 Parsed: deal_amount={deal_amount}, deposit_amount={deposit_amount}")
 
+        # Map outcome to stage field
+        outcome_to_stage_map = {
+            "Won": "Closed Won",
+            "Lost": "Closed Lost",
+            "Follow-up Scheduled": "Follow up",
+            "Pending": "Follow up",
+            "Needs More Info": "Follow up"
+        }
+        stage = outcome_to_stage_map.get(crm_data.get("outcome", ""), "Follow up")
+
         deal_data = {
             "external_id": external_id,
             "client_id": external_id,
             "meeting_id": external_id,
             "client_name": crm_data.get("client_name", crm_data.get("customer_name", "")),
+            # REMOVED: "stage" field - doesn't exist in Baserow schema (use meeting_outcome in Meetings table instead)
             "products_discussed": products,
             "deal_amount": deal_amount,
             "deposit_amount": deposit_amount,
-            "win_probability": float(crm_data.get("win_probability", 0.5)),  # NEW: Win probability (0.0 to 1.0)
+            "win_probability": float(crm_data.get("win_probability", 0.5)),  # Win probability (0.0 to 1.0)
             "next_action": crm_data.get("action_items", ""),
             "objections": objections
         }
 
-        # Only include close_date if we have a valid ISO 8601 date
+        # Only include close_date if we have a valid YYYY-MM-DD date
         if close_date_formatted and close_date_formatted.strip():
             deal_data["close_date"] = close_date_formatted
 
@@ -561,3 +584,175 @@ class BaserowManager:
             table_id=self.sales_coaching_table_id,
             filters=filters or []
         )
+
+    # === Chunks Table Methods (Parent-Child Architecture) ===
+
+    async def sync_chunks(self, chunks: List[Dict[str, Any]], transcript_id: str, transcript_filename: str) -> Dict[str, Any]:
+        """
+        Sync all chunks (header, parent, child) to Baserow Chunks table.
+
+        This enables human-in-the-loop annotation and correction of:
+        - sales_stage (Discovery/Demo/Objection Handling/Closing)
+        - detected_topics (add missing, remove irrelevant)
+        - intent, sentiment, discourse_marker
+
+        Args:
+            chunks: List of all chunks (from ChunkerAgent.run()['all_chunks'])
+            transcript_id: External ID from header
+            transcript_filename: Source filename for reference
+
+        Returns:
+            Dict with sync status and chunk count
+        """
+        print(f"📦 BaserowManager: Syncing {len(chunks)} chunks to Baserow...")
+
+        try:
+            external_id = int(transcript_id) if transcript_id.isdigit() else hash(transcript_id) % 10**8
+
+            synced_count = 0
+            for chunk in chunks:
+                await self._upsert_chunk(chunk, external_id, transcript_filename)
+                synced_count += 1
+
+            print(f"   ✅ Synced {synced_count} chunks to Baserow (external_id: {external_id})")
+            return {"status": "success", "synced_count": synced_count}
+
+        except Exception as e:
+            print(f"   ❌ Chunk sync failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "failed", "error": str(e)}
+
+    async def _upsert_chunk(self, chunk: Dict[str, Any], external_id: int, transcript_filename: str) -> Dict[str, Any]:
+        """
+        Upsert individual chunk to Baserow.
+
+        Uses chunk_id as unique identifier (chunks are never updated, only created).
+        """
+        # Prepare chunk data for Baserow
+        chunk_data = {
+            "chunk_id": chunk.get("chunk_id"),
+            "parent_id": chunk.get("parent_id") or "",  # Empty string if None
+            "chunk_type": chunk.get("chunk_type"),
+            "external_id": external_id,
+            "transcript_filename": transcript_filename,
+            "text": chunk.get("text", ""),
+            "speaker_name": chunk.get("speaker_name") or "",
+            "start_time": float(chunk.get("start_time", 0.0)),
+            "end_time": float(chunk.get("end_time", 0.0)),
+            "conversation_phase": chunk.get("conversation_phase") or "",
+            "timestamp_start": chunk.get("timestamp_start") or chunk.get("timestamp") or "",
+            "timestamp_end": chunk.get("timestamp_end") or ""
+        }
+
+        # Baserow valid values for single_select fields
+        VALID_SALES_STAGES = {
+            "Setting up for meeting", "Assistant Intro Rep", "Greeting", "Client Motivation",
+            "Set Meeting Agenda", "Establish Credibility", "Discovery", "Compare Options",
+            "Present Solution", "Pricing", "Objection Handling", "Closing", "Unknown"
+        }
+        VALID_INTENTS = {"question", "statement", "objection", "agreement", "proposal", "clarification"}
+        VALID_SENTIMENTS = {"positive", "neutral", "concerned", "excited"}  # NOTE: No "negative"
+        VALID_DISCOURSE_MARKERS = {"transition", "confirmation", "hedge", "emphasis", "none"}
+
+        # Add optional fields (only if not None/empty AND valid)
+        sales_stage = chunk.get("sales_stage")
+        if sales_stage and sales_stage in VALID_SALES_STAGES:
+            chunk_data["sales_stage"] = sales_stage
+        elif sales_stage:
+            # Invalid value, use Unknown
+            chunk_data["sales_stage"] = "Unknown"
+
+        if chunk.get("detected_topics"):
+            # Convert list to JSON string for storage
+            topics = chunk.get("detected_topics")
+            if isinstance(topics, list):
+                chunk_data["detected_topics"] = json.dumps(topics)
+            else:
+                chunk_data["detected_topics"] = str(topics)
+
+        intent = chunk.get("intent")
+        if intent and intent in VALID_INTENTS:
+            chunk_data["intent"] = intent
+
+        sentiment = chunk.get("sentiment")
+        if sentiment == "negative":
+            # Map "negative" to "concerned" (Baserow doesn't have "negative")
+            chunk_data["sentiment"] = "concerned"
+        elif sentiment and sentiment in VALID_SENTIMENTS:
+            chunk_data["sentiment"] = sentiment
+
+        discourse_marker = chunk.get("discourse_marker")
+        if discourse_marker and discourse_marker in VALID_DISCOURSE_MARKERS:
+            chunk_data["discourse_marker"] = discourse_marker
+
+        if chunk.get("contains_entity") is not None:
+            chunk_data["contains_entity"] = bool(chunk.get("contains_entity"))
+
+        if chunk.get("turn_count") is not None:
+            chunk_data["turn_count"] = int(chunk.get("turn_count", 0))
+
+        if chunk.get("speaker_balance") is not None:
+            chunk_data["speaker_balance"] = float(chunk.get("speaker_balance", 0.0))
+
+        # Transform to field IDs
+        chunk_data_with_ids = self._transform_to_field_ids(chunk_data, self.chunks_field_map)
+
+        # Check if chunk already exists (by chunk_id)
+        existing_row = self._find_chunk_by_id(chunk.get("chunk_id"))
+
+        if existing_row:
+            # Update existing chunk
+            return self.client.update_database_table_row(
+                table_id=self.chunks_table_id,
+                row_id=existing_row['id'],
+                record=chunk_data_with_ids
+            )
+        else:
+            # Create new chunk
+            try:
+                return self.client.create_database_table_row(
+                    table_id=self.chunks_table_id,
+                    record=chunk_data_with_ids
+                )
+            except Exception as e:
+                print(f"      ❌ DEBUG: Failed to create chunk")
+                print(f"         chunk_type: {chunk.get('chunk_type')}")
+                print(f"         sales_stage: {chunk.get('sales_stage')}")
+                print(f"         intent: {chunk.get('intent')}")
+                print(f"         sentiment: {chunk.get('sentiment')}")
+                print(f"         discourse_marker: {chunk.get('discourse_marker')}")
+                print(f"         chunk_data_with_ids: {str(chunk_data_with_ids)[:300]}")
+                print(f"         Error: {str(e)}")
+                raise
+
+    def _find_chunk_by_id(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Find existing chunk by chunk_id (UUID).
+
+        Returns existing row or None.
+        """
+        if not chunk_id:
+            return None
+
+        try:
+            chunk_id_field_id = self.chunks_field_map.get("chunk_id")
+            if not chunk_id_field_id:
+                return None
+
+            filter_obj = Filter(
+                field=chunk_id_field_id,
+                filter=FilterMode.equal,
+                value=chunk_id
+            )
+
+            result = self.client.list_database_table_rows(
+                table_id=self.chunks_table_id,
+                filter=[filter_obj]
+            )
+
+            rows = result.results if hasattr(result, 'results') else result
+            return rows[0] if rows else None
+
+        except Exception:
+            return None

@@ -14,206 +14,116 @@ class ChunkerAgent(BaseAgent):
 
     def __init__(self, settings):
         super().__init__(settings)
-        # Initialize BOTH chunkers for hybrid approach
 
-        # 1. Semantic Dialogue Chunker (PRIMARY - for dialogue sections)
-        #    Respects turn boundaries, conversation phases, entity preservation
+        # Parent-Child Semantic Dialogue Chunker
+        # Creates speaker-turn child chunks + conversation-phase parent chunks
         self.semantic_chunker = SemanticDialogueChunker(
-            target_chunk_size=1400,  # ~350 tokens, optimal for embedding coherence
-            min_chunk_size=700,      # 50% of target
-            max_chunk_size=2100,     # 150% of target
-            overlap_turns=2          # 2 dialogue turns overlap for context
+            turns_per_parent=7,        # Target 7 turns per parent chunk
+            min_turns_per_parent=5,    # Minimum 5 turns before new parent
+            max_turns_per_parent=10    # Maximum 10 turns before forced split
         )
 
-        # 2. Character-based splitter (FALLBACK - for non-dialogue sections like headers)
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1400,     # ~350 tokens
-            chunk_overlap=140,   # 10% overlap
-        )
-
-    def _extract_chunk_metadata(self, chunk_text: str, structured_dialogue: list = None) -> dict:
+    async def run(self, file_path: Path, structured_dialogue: list = None, transcript_id: str = None, conversation_phases: list = None):
         """
-        Extracts metadata for a chunk from the enriched structured dialogue.
+        Creates parent-child chunk hierarchy from transcript.
 
-        Determines the conversation phase, speakers, and timestamp range by analyzing
-        which dialogue turns appear in this chunk.
-
-        Args:
-            chunk_text: The text content of the chunk
-            structured_dialogue: List of enriched dialogue turns with conversation_phase
-
-        Returns:
-            dict with keys: phase, speakers, timestamp_start, timestamp_end
-        """
-        if not structured_dialogue:
-            return {"phase": None, "speakers": [], "timestamp_start": None, "timestamp_end": None}
-
-        # Find dialogue turns that appear in this chunk
-        import re
-        timestamp_pattern = re.compile(r'(\d{2}:\d{2}:\d{2})')
-        timestamps_in_chunk = timestamp_pattern.findall(chunk_text)
-
-        if not timestamps_in_chunk:
-            return {"phase": None, "speakers": [], "timestamp_start": None, "timestamp_end": None}
-
-        # Find matching dialogue turns
-        matching_turns = []
-        for turn in structured_dialogue:
-            if turn.get("timestamp") in timestamps_in_chunk:
-                matching_turns.append(turn)
-
-        if not matching_turns:
-            return {"phase": None, "speakers": [], "timestamp_start": None, "timestamp_end": None}
-
-        # Extract metadata from matching turns
-        phases = [turn.get("conversation_phase") for turn in matching_turns if turn.get("conversation_phase")]
-        speakers = list(set(turn.get("speaker") for turn in matching_turns if turn.get("speaker")))
-
-        # Use the most common phase in this chunk
-        phase = max(set(phases), key=phases.count) if phases else None
-
-        # SEMANTIC NLP METADATA EXTRACTION
-        # Collect intent, sentiment, discourse markers from enriched turns
-        intents = [turn.get("intent") for turn in matching_turns if turn.get("intent")]
-        sentiments = [turn.get("sentiment") for turn in matching_turns if turn.get("sentiment")]
-        discourse_markers = [turn.get("discourse_marker") for turn in matching_turns if turn.get("discourse_marker")]
-
-        # Determine dominant metadata
-        dominant_intent = max(set(intents), key=intents.count) if intents else None
-        dominant_sentiment = max(set(sentiments), key=sentiments.count) if sentiments else None
-        has_entities = any(turn.get("contains_entity") for turn in matching_turns)
-
-        return {
-            "phase": phase,
-            "speakers": speakers,
-            "timestamp_start": matching_turns[0].get("timestamp") if matching_turns else None,
-            "timestamp_end": matching_turns[-1].get("timestamp") if matching_turns else None,
-            # Semantic NLP metadata
-            "dominant_intent": dominant_intent,
-            "dominant_sentiment": dominant_sentiment,
-            "contains_entities": has_entities,
-            "discourse_markers": list(set(dm for dm in discourse_markers if dm and dm != "none"))
-        }
-
-    async def run(self, file_path: Path, structured_dialogue: list = None):
-        """
-        Creates semantic chunks from transcript with rich metadata preservation.
-
-        NEW ARCHITECTURE: Receives enriched dialogue from ParserAgent
-        Each chunk inherits metadata from the dialogue turns it contains.
+        PARENT-CHILD ARCHITECTURE:
+        - Child chunks: Individual speaker turns (1 turn = 1 chunk, embedded)
+        - Parent chunks: Conversation phase segments (5-10 turns, stored for context)
+        - All chunks have UUIDs and rich metadata for Baserow/Qdrant storage
 
         Args:
             file_path: Path to transcript file
             structured_dialogue: Enriched dialogue turns with conversation_phase metadata
+            transcript_id: External ID from header for linking
+            conversation_phases: List of conversation phase boundaries
 
         Returns:
-            List of chunk dictionaries with metadata
+            Dict with:
+                - all_chunks: Combined list of child + parent chunks (for Baserow sync)
+                - child_chunks: Speaker-turn chunks (for embedding in Qdrant)
+                - parent_chunks: Phase segment chunks (for context storage)
         """
-        print(f"📦 ChunkerAgent: Creating semantic chunks...")
+        print(f"📦 ChunkerAgent: Creating parent-child chunk hierarchy...")
         try:
             content = file_path.read_text(encoding='utf-8')
             print(f"   Successfully read {len(content)} characters.")
 
-            # NEW: Detect header boundary (first timestamp pattern)
+            # Extract header section
             import re
+            import uuid
             header_end = re.search(r'\[\d{2}:\d{2}:\d{2}\]', content)
             if header_end:
                 header_text = content[:header_end.start()].strip()
-                dialogue_text = content[header_end.start():].strip()
                 print(f"   📋 Extracted header section using timestamp pattern")
             else:
-                # Fallback: Assume first 14 lines (based on plan)
                 lines = content.split('\n')
                 header_text = '\n'.join(lines[:14])
-                dialogue_text = '\n'.join(lines[14:])
                 print(f"   📋 Extracted header section using first 14 lines fallback")
 
-            print(f"   💬 Dialogue section extracted")
-
-            # Create chunks with metadata dictionaries
-            chunks = []
-
-            # Chunk 0: Header with metadata
-            chunks.append({
-                "text": header_text,
+            # Create header chunk (special chunk type, not in parent-child hierarchy)
+            header_chunk = {
+                "chunk_id": str(uuid.uuid4()),
+                "parent_id": None,
                 "chunk_type": "header",
-                "index": 0,
-                "conversation_phase": None,  # Header has no phase
-                "speakers": []
-            })
+                "external_id": transcript_id,
+                "text": header_text,
+                "speaker_name": None,
+                "start_time": 0.0,
+                "end_time": 0.0,
+                "sales_stage": None,
+                "conversation_phase": None,
+                "detected_topics": [],
+                "intent": None,
+                "sentiment": None,
+                "discourse_marker": None,
+                "contains_entity": False,
+                "turn_count": None,
+                "speaker_balance": None
+            }
 
-            # Chunks 1+: Dialogue chunks with SEMANTIC chunking
+            # Create parent-child chunks from dialogue
             if structured_dialogue and len(structured_dialogue) > 0:
-                # Use SEMANTIC DIALOGUE CHUNKER (respects turn boundaries, phases)
-                print(f"   🧠 Using semantic dialogue chunking on {len(structured_dialogue)} turns")
+                print(f"   🧠 Creating parent-child chunks from {len(structured_dialogue)} speaker turns")
 
-                # Get conversation phases from state (if available)
-                conversation_phases = None
-                if structured_dialogue[0].get("conversation_phase"):
-                    # Extract unique phases from dialogue
-                    phases_seen = {}
-                    for turn in structured_dialogue:
-                        phase_name = turn.get("conversation_phase")
-                        timestamp = turn.get("timestamp")
-                        if phase_name and phase_name not in phases_seen:
-                            phases_seen[phase_name] = timestamp
-
-                    conversation_phases = [
-                        {"phase": name, "start_timestamp": ts, "end_timestamp": None}
-                        for name, ts in phases_seen.items()
-                    ]
-
-                # Chunk dialogue into semantically coherent segments
-                dialogue_chunk_turns = self.semantic_chunker.chunk_dialogue(
+                # Use new parent-child chunker
+                child_chunks, parent_chunks = self.semantic_chunker.chunk_dialogue(
                     structured_dialogue,
-                    conversation_phases
+                    conversation_phases,
+                    external_id=transcript_id
                 )
 
-                print(f"   ✅ Created {len(dialogue_chunk_turns)} semantic chunks")
+                print(f"   ✅ Created {len(child_chunks)} child chunks (speaker turns)")
+                print(f"   ✅ Created {len(parent_chunks)} parent chunks (phase segments)")
 
-                # Convert each chunk (list of turns) to formatted text + metadata
-                for i, turn_list in enumerate(dialogue_chunk_turns, start=1):
-                    # Convert turns to text
-                    chunk_text = self.semantic_chunker.turns_to_text(turn_list, format="dialogue")
+                # Combine all chunks for return
+                all_chunks = [header_chunk] + parent_chunks + child_chunks
 
-                    # Compute rich metadata from turns
-                    chunk_metadata = self.semantic_chunker.compute_chunk_metadata(turn_list)
+                return {
+                    "all_chunks": all_chunks,  # For Baserow sync (all types)
+                    "child_chunks": child_chunks,  # For Qdrant embedding
+                    "parent_chunks": parent_chunks,  # For Qdrant payload storage
+                    "header_chunk": header_chunk  # For Qdrant metadata
+                }
 
-                    chunks.append({
-                        "text": chunk_text,
-                        "chunk_type": "dialogue",
-                        "index": i,
-                        **chunk_metadata  # Unpack all computed metadata
-                    })
-
-            elif dialogue_text:
-                # FALLBACK: No structured dialogue available, use character-based chunking
-                print(f"   ⚠️ No structured dialogue, using fallback character-based chunking")
-                dialogue_chunks = self.text_splitter.split_text(dialogue_text)
-
-                for i, chunk_text in enumerate(dialogue_chunks, start=1):
-                    chunks.append({
-                        "text": chunk_text,
-                        "chunk_type": "dialogue",
-                        "index": i,
-                        "conversation_phase": None,
-                        "speakers": []
-                    })
-
-            print(f"   Split into {len(chunks)} chunks (1 header + {len(chunks)-1} dialogue)")
-            if structured_dialogue:
-                print(f"   ✅ Enriched chunks with conversation phase metadata")
-            print(f"   Header chunk preview: '{chunks[0]['text'][:100]}...'")
-
-            if chunks and len(chunks) > 0:
-                print(f"   First chunk: '{chunks[0]['text'][:80]}...'")
-
-            return chunks
+            else:
+                # No dialogue, return just header
+                print(f"   ⚠️ No structured dialogue available")
+                return {
+                    "all_chunks": [header_chunk],
+                    "child_chunks": [],
+                    "parent_chunks": [],
+                    "header_chunk": header_chunk
+                }
 
         except FileNotFoundError:
             print(f"   ❌ ERROR: File not found at {file_path}")
+            return {"all_chunks": [], "child_chunks": [], "parent_chunks": [], "header_chunk": None}
         except Exception as e:
             print(f"   ❌ ERROR: An unexpected error occurred: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"all_chunks": [], "child_chunks": [], "parent_chunks": [], "header_chunk": None}
 
 
 # This block allows us to test the agent by running the file directly

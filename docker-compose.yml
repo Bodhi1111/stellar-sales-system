@@ -19,17 +19,19 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  neo4j:
-    image: neo4j:5
-    container_name: stellar_neo4j
-    environment:
-      NEO4J_AUTH: neo4j/password
-      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"  # Add this line
-    ports:
-      - '7474:7474'
-      - '7687:7687'
-    volumes:
-      - neo4j_data:/data
+  # DISABLED: Neo4j service (not used in current pipeline)
+  # Uncomment to re-enable Neo4j graph features
+  # neo4j:
+  #   image: neo4j:5
+  #   container_name: stellar_neo4j
+  #   environment:
+  #     NEO4J_AUTH: neo4j/password
+  #     NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+  #   ports:
+  #     - '7474:7474'
+  #     - '7687:7687'
+  #   volumes:
+  #     - neo4j_data:/data
 
   ollama:
     image: ollama/ollama
@@ -38,6 +40,7 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+
   baserow:
     image: baserow/baserow:latest
     container_name: baserow
@@ -49,9 +52,59 @@ services:
       - BASEROW_PUBLIC_URL=http://localhost:8080
     restart: unless-stopped
 
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: stellar_n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    depends_on:
+      - postgres
+      - qdrant
+      - ollama
+      - baserow
+    environment:
+      # n8n Configuration
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - N8N_METRICS=false
+
+      # n8n License and Encryption
+      - N8N_ENCRYPTION_KEY=oPV90bI+dCV+2AaHW+m/IcNq0MeS2Eev
+      - N8N_LICENSE_ACTIVATION_KEY=fd91bc69-b21f-49bf-98a9-bb7310bee4d5
+      - DB_SQLITE_POOL_SIZE=5
+      - N8N_RUNNERS_ENABLED=true
+
+      # Service URLs (using container names on same network)
+      - OLLAMA_API_URL=http://stellar_ollama:11434/api/generate
+      - QDRANT_URL=http://stellar_qdrant:6333
+      - BASEROW_URL=http://baserow:80
+      - FASTAPI_URL=http://host.docker.internal:8000
+
+      # LLM Configuration
+      - LLM_MODEL_NAME=mistral:latest
+
+      # Baserow Configuration
+      - BASEROW_TOKEN=6TElBEHaafiG4nmajttcnaN7TZEIioi7
+      - BASEROW_DATABASE_ID=174
+      - BASEROW_CLIENTS_ID=704
+      - BASEROW_MEETINGS_ID=705
+      - BASEROW_DEALS_ID=706
+      - BASEROW_COMMUNICATIONS_ID=707
+      - BASEROW_SALES_COACHING_ID=708
+      - BASEROW_CHUNKS_ID=709
+
+    volumes:
+      # Mount existing n8n data folder with workflows and license
+      - /Users/joshuavaughan/n8n:/home/node/.n8n
+      # Mount McAdams Transcripts directory (READ-WRITE for file watcher)
+      - "/Users/joshuavaughan/Documents/McAdams Transcripts:/transcripts"
+
 volumes:
   postgres_data:
   qdrant_data:
-  neo4j_data:
+  # neo4j_data:  # DISABLED: Uncomment if re-enabling Neo4j
   ollama_data:
   baserow_data:
