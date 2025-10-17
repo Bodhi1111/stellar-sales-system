@@ -1,0 +1,417 @@
+{
+  "name": "Complete Workflow - All Tables",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stellar-sales-webhook",
+        "responseMode": "onReceived"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "stellar-sales-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create comprehensive test data for Linda Barnes\nreturn {\n  transcript_id: 1234567890,\n  client_name: 'Linda Barnes',\n  client_email: 'linda@example.com',\n  client_phone: '555-123-4567',\n  marital_status: 'Married',\n  children_count: 2,\n  beneficiaries_count: 3,\n  real_estate_count: 1,\n  state_of_residence: 'California',\n  meeting_date: '2025-10-15',\n  meeting_time: '14:00:00',\n  meeting_title: 'Estate Planning Advisor Meeting',\n  duration_minutes: 45,\n  product_discussed: 'Estate Planning',\n  deal_amount: 5000,\n  deposit_amount: 500,\n  outcome: 'Follow-up Scheduled',\n  close_date: '2025-11-15',\n  transcript_content: 'Discussion about estate planning needs and trust setup. Client expressed interest in protecting assets for children. Follow-up scheduled for next week.',\n  coaching_notes: 'Client showed good understanding of estate planning concepts. Need to follow up on trust funding strategy.'\n};"
+      },
+      "id": "create-complete-data",
+      "name": "Create Complete Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://baserow:80/api/database/rows/table/704/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token 6TElBEHaafiG4nmajttcnaN7TZEIioi7"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "field_6791",
+              "value": "={{ $json.client_name }}"
+            },
+            {
+              "name": "field_6790",
+              "value": "={{ $json.transcript_id }}"
+            },
+            {
+              "name": "field_6792",
+              "value": "={{ $json.client_email }}"
+            },
+            {
+              "name": "field_6793",
+              "value": "={{ $json.client_phone }}"
+            },
+            {
+              "name": "field_6794",
+              "value": "={{ $json.marital_status }}"
+            },
+            {
+              "name": "field_6795",
+              "value": "={{ $json.children_count }}"
+            },
+            {
+              "name": "field_6796",
+              "value": "={{ $json.beneficiaries_count }}"
+            },
+            {
+              "name": "field_6822",
+              "value": "={{ $json.real_estate_count }}"
+            },
+            {
+              "name": "field_6823",
+              "value": "={{ $json.state_of_residence }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sync-clients",
+      "name": "Sync to Baserow - Clients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://baserow:80/api/database/rows/table/705/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token 6TElBEHaafiG4nmajttcnaN7TZEIioi7"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "field_6797",
+              "value": "={{ $json.transcript_id }}"
+            },
+            {
+              "name": "field_6798",
+              "value": "={{ $json.client_name }}"
+            },
+            {
+              "name": "field_6799",
+              "value": "={{ $json.meeting_title }}"
+            },
+            {
+              "name": "field_6800",
+              "value": "={{ $json.meeting_date }}"
+            },
+            {
+              "name": "field_6801",
+              "value": "={{ $json.meeting_time }}"
+            },
+            {
+              "name": "field_6802",
+              "value": "={{ $json.duration_minutes }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sync-meetings",
+      "name": "Sync to Baserow - Meetings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://baserow:80/api/database/rows/table/706/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token 6TElBEHaafiG4nmajttcnaN7TZEIioi7"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "field_6803",
+              "value": "={{ $json.transcript_id }}"
+            },
+            {
+              "name": "field_6804",
+              "value": "={{ $json.client_name }}"
+            },
+            {
+              "name": "field_6805",
+              "value": "={{ $json.product_discussed }}"
+            },
+            {
+              "name": "field_6806",
+              "value": "={{ $json.deal_amount }}"
+            },
+            {
+              "name": "field_6807",
+              "value": "={{ $json.deposit_amount }}"
+            },
+            {
+              "name": "field_6808",
+              "value": "={{ $json.outcome }}"
+            },
+            {
+              "name": "field_6809",
+              "value": "={{ $json.close_date }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sync-deals",
+      "name": "Sync to Baserow - Deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://baserow:80/api/database/rows/table/707/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token 6TElBEHaafiG4nmajttcnaN7TZEIioi7"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "field_6810",
+              "value": "={{ $json.transcript_id }}"
+            },
+            {
+              "name": "field_6811",
+              "value": "={{ $json.client_name }}"
+            },
+            {
+              "name": "field_6812",
+              "value": "Meeting"
+            },
+            {
+              "name": "field_6813",
+              "value": "={{ $json.meeting_date }}"
+            },
+            {
+              "name": "field_6814",
+              "value": "={{ $json.transcript_content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sync-communications",
+      "name": "Sync to Baserow - Communications",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://baserow:80/api/database/rows/table/708/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token 6TElBEHaafiG4nmajttcnaN7TZEIioi7"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "field_6815",
+              "value": "={{ $json.transcript_id }}"
+            },
+            {
+              "name": "field_6816",
+              "value": "={{ $json.client_name }}"
+            },
+            {
+              "name": "field_6817",
+              "value": "={{ $json.coaching_notes }}"
+            },
+            {
+              "name": "field_6818",
+              "value": "High"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sync-coaching",
+      "name": "Sync to Baserow - Coaching",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 600]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      },
+      "id": "sync-complete",
+      "name": "Sync Complete",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [900, 400]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create Complete Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Complete Data": {
+      "main": [
+        [
+          {
+            "node": "Sync to Baserow - Clients",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sync to Baserow - Meetings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sync to Baserow - Deals",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sync to Baserow - Communications",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sync to Baserow - Coaching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync to Baserow - Clients": {
+      "main": [
+        [
+          {
+            "node": "Sync Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync to Baserow - Meetings": {
+      "main": [
+        [
+          {
+            "node": "Sync Complete",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Sync to Baserow - Deals": {
+      "main": [
+        [
+          {
+            "node": "Sync Complete",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Sync to Baserow - Communications": {
+      "main": [
+        [
+          {
+            "node": "Sync Complete",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Sync to Baserow - Coaching": {
+      "main": [
+        [
+          {
+            "node": "Sync Complete",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "staticData": {},
+  "pinData": {},
+  "tags": [],
+  "active": true
+}

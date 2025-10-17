@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Sales System - Pipeline Visualization</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .diagram-container {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+        .legend {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 30px;
+            padding: 20px;
+            background: #f0f4f8;
+            border-radius: 8px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .legend-box {
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .legend-text {
+            font-size: 13px;
+            color: #555;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        .links {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .links a {
+            display: inline-block;
+            margin: 0 10px;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            transition: background 0.3s;
+        }
+        .links a:hover {
+            background: #764ba2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Stellar Sales System Pipeline</h1>
+        <p class="subtitle">LangGraph Multi-Agent Architecture with RAG</p>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value">9</div>
+                <div class="stat-label">Pipeline Nodes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">15+</div>
+                <div class="stat-label">Total Agents</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">3</div>
+                <div class="stat-label">Parallel Branches</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">5</div>
+                <div class="stat-label">Database Integrations</div>
+            </div>
+        </div>
+
+        <div class="diagram-container">
+            <div class="mermaid">
+                graph TD;
+                    __start__([START]):::first
+                    parser(Parser Agent<br/>Parse dialogue turns)
+                    structuring(Structuring Agent<br/>Analyze structure)
+                    chunker(Chunker Agent<br/>Create chunks)
+                    embedder(Embedder Agent<br/>Generate embeddings)
+                    email(Email Agent<br/>Extract drafts)
+                    social(Social Agent<br/>Find content)
+                    sales_coach(Sales Coach<br/>Analyze performance)
+                    crm(CRM Agent<br/>Build record)
+                    persistence(Persistence Agent<br/>Save to DB)
+                    __end__([END]):::last
+                    
+                    __start__ --> structuring;
+                    structuring --> parser;
+                    parser --> chunker;
+                    chunker --> embedder;
+                    embedder --> email;
+                    embedder --> sales_coach;
+                    embedder --> social;
+                    email --> crm;
+                    sales_coach --> crm;
+                    social --> crm;
+                    crm --> persistence;
+                    persistence --> __end__;
+                    
+                    classDef default fill:#667eea,stroke:#333,stroke-width:2px,color:#fff
+                    classDef first fill:#48bb78,stroke:#2f855a,stroke-width:3px,color:#fff
+                    classDef last fill:#f56565,stroke:#c53030,stroke-width:3px,color:#fff
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-box" style="background: #48bb78;"></div>
+                <div class="legend-text"><strong>START</strong> - Entry point</div>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box" style="background: #667eea;"></div>
+                <div class="legend-text"><strong>Processing</strong> - Agent nodes</div>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box" style="background: #f56565;"></div>
+                <div class="legend-text"><strong>END</strong> - Completion</div>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box" style="background: #805ad5;"></div>
+                <div class="legend-text"><strong>Parallel</strong> - Email/Social/Coach run together</div>
+            </div>
+        </div>
+
+        <div class="links">
+            <a href="http://localhost:3000" target="_blank">🔍 Langfuse (Observability)</a>
+            <a href="http://localhost:8080" target="_blank">📊 Baserow (CRM)</a>
+            <a href="http://localhost:6333/dashboard" target="_blank">🔢 Qdrant (Vector DB)</a>
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'default',
+            flowchart: { 
+                curve: 'linear',
+                padding: 20
+            }
+        });
+    </script>
+</body>
+</html>
+

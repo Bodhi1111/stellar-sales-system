@@ -35,6 +35,20 @@ class Settings(BaseSettings):
     BASEROW_SALES_COACHING_ID: int
     BASEROW_CHUNKS_ID: int  # Parent-child chunk metadata table
 
+    # N8N Settings (optional - for RAG workflow automation)
+    N8N_LICENSE_KEY: str | None = None
+
+    # LangSmith Settings (observability and monitoring - cloud only)
+    LANGCHAIN_TRACING_V2: str = "false"
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
+    LANGCHAIN_API_KEY: str | None = None
+    LANGCHAIN_PROJECT: str = "stellar-sales-system"
+    
+    # Langfuse Settings (open-source observability - cloud or self-hosted)
+    LANGFUSE_PUBLIC_KEY: str | None = None
+    LANGFUSE_SECRET_KEY: str | None = None
+    LANGFUSE_HOST: str = "https://us.cloud.langfuse.com"
+
     # Computed Properties (derived from file location, not from .env)
     @property
     def BASE_DIR(self) -> Path:
@@ -49,5 +63,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields in .env
 
 settings = Settings()

@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  langfuse-server:
+    image: langfuse/langfuse:2
+    container_name: stellar_langfuse
+    depends_on:
+      - langfuse-postgres
+    ports:
+      - "3000:3000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
+      
+      # Auth (change these!)
+      NEXTAUTH_SECRET: changeme-secret-key-min-32-chars-long
+      NEXTAUTH_URL: http://localhost:3000
+      SALT: changeme-salt-min-32-chars-long
+      
+      # Optional: Disable telemetry
+      TELEMETRY_ENABLED: "false"
+      
+      # Optional: Enable debug logging
+      # NODE_ENV: development
+    restart: unless-stopped
+
+  langfuse-postgres:
+    image: postgres:15
+    container_name: stellar_langfuse_db
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+    volumes:
+      - langfuse_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  langfuse_data:
+    driver: local
+
