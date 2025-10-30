@@ -26,3 +26,6 @@ nltk>=3.8.0
 
 # Hybrid Search & Reranking
 rank-bm25>=0.2.2
+
+# Observability & Monitoring
+langfuse>=2.0.0

@@ -7,20 +7,29 @@ services:
     depends_on:
       - langfuse-postgres
     ports:
-      - "3000:3000"
+      - "3000:3000"  # Web UI accessible at http://localhost:3000
     environment:
-      # Database
+      # Database Connection
+      # Connects to the PostgreSQL database defined below
       DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
       
-      # Auth (change these!)
-      NEXTAUTH_SECRET: changeme-secret-key-min-32-chars-long
-      NEXTAUTH_URL: http://localhost:3000
-      SALT: changeme-salt-min-32-chars-long
+      # Authentication & Security
+      # NEXTAUTH_SECRET: Used to encrypt session tokens (must be 32+ characters)
+      # Generated with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+      NEXTAUTH_SECRET: fQtVlRg9qY2eZxXWgLorW0am05En9AYrSjq7uSZC74s
       
-      # Optional: Disable telemetry
+      # NEXTAUTH_URL: The public URL where LangFuse is accessible
+      NEXTAUTH_URL: http://localhost:3000
+      
+      # SALT: Used for hashing sensitive data (must be 32+ characters)
+      SALT: o-wMDHLsf_kwwCUr52OvE394gjIlZPbQ3rMjBhCmF9k
+      
+      # Telemetry
+      # Set to "false" to disable anonymous usage statistics
       TELEMETRY_ENABLED: "false"
       
-      # Optional: Enable debug logging
+      # Debug Mode (optional)
+      # Uncomment to enable verbose logging for troubleshooting
       # NODE_ENV: development
     restart: unless-stopped
 
@@ -28,14 +37,19 @@ services:
     image: postgres:15
     container_name: stellar_langfuse_db
     environment:
+      # PostgreSQL Database Configuration
+      # This database stores LangFuse traces, spans, and metadata
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
       POSTGRES_PASSWORD: langfuse
     volumes:
+      # Persist database data across container restarts
       - langfuse_data:/var/lib/postgresql/data
     restart: unless-stopped
 
 volumes:
+  # Named volume for LangFuse PostgreSQL data persistence
+  # Data location: /var/lib/docker/volumes/langfuse_data
   langfuse_data:
     driver: local
 
